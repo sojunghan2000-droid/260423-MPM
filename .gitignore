@@ -1,0 +1,16 @@
+MaterialToolShared/
+__pycache__/
+*.pyc
+.streamlit/secrets.toml
+node_modules/
+.claude/
+.claudeignore
+.playwright-mcp/
+*.bak
+app_legacy.py
+app_new.py
+ppt_screens/
+=1.30.0
+nul
+%USERPROFILE%/
+*.tmp.*

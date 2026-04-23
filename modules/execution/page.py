@@ -1,8 +1,7 @@
 """Execution registration page."""
 
-import sqlite3
-
 import streamlit as st
+from supabase import Client
 
 from datetime import date
 from modules.request.crud import req_list, req_update_status
@@ -12,13 +11,12 @@ from modules.execution.photos import ui_photo_upload
 from modules.outputs.crud import generate_all_outputs
 
 
-def _do_confirm(con, rid: str, reedit_key: str):
+def _do_confirm(con: Client, rid: str, reedit_key: str):
     """Execute confirmation."""
     try:
         req_update_status(con, rid, "EXECUTING")
         execution_upsert(con, rid, st.session_state.get("USER_NAME", ""), st.session_state.get("USER_ROLE", ""), {}, "")
         req_update_status(con, rid, "DONE")
-        con.commit()
     except Exception as e:
         st.error(f"저장 오류: {e}")
         st.stop()
@@ -31,7 +29,7 @@ def _do_confirm(con, rid: str, reedit_key: str):
     st.rerun()
 
 
-def page_execute(con: sqlite3.Connection):
+def page_execute(con: Client):
     st.markdown("""
     <style>
     [data-testid="stSelectbox"] [data-testid="stWidgetLabel"],

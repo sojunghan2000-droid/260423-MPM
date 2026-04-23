@@ -1,9 +1,9 @@
 """Request registration page."""
 
-import sqlite3
 from datetime import date
 
 import streamlit as st
+from supabase import Client
 
 from config import KIND_IN, KIND_OUT, RISK_LEVELS
 from modules.request.crud import req_insert, req_get
@@ -26,7 +26,7 @@ def _time_picker(key_prefix: str) -> tuple:
     return result[0], result[1]
 
 
-def page_request(con: sqlite3.Connection):
+def page_request(con: Client):
     st.markdown("### 📝 요청 등록")
 
     # 그룹1 - 기본정보

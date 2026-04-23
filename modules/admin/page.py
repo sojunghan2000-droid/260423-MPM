@@ -1,9 +1,9 @@
 """Admin settings page."""
 
 import json
-import sqlite3
 
 import streamlit as st
+from supabase import Client
 
 from config import DEFAULT_SITE_NAME, DEFAULT_SITE_PIN, DEFAULT_ADMIN_PIN, ROLES
 from db.models import settings_get, settings_set
@@ -11,7 +11,7 @@ from modules.approval.crud import routing_get
 from modules.admin.module_manager import render_module_manager
 
 
-def page_admin(con: sqlite3.Connection):
+def page_admin(con: Client):
     st.markdown("""
     <style>
     .st-key-admin_wrap [data-testid="stWidgetLabel"],

@@ -1,123 +1,114 @@
-"""Request CRUD operations."""
+"""Request CRUD operations (Supabase-backed)."""
 
 import uuid
-import sqlite3
 from typing import Dict, Any, List, Optional
 
+from supabase import Client
 from shared.helpers import now_str
 
 
-def req_insert(con: sqlite3.Connection, data: Dict[str, Any]) -> str:
-    """Insert a new request and return its ID."""
+REQ_COLS = [
+    "id", "created_at", "updated_at", "status", "kind", "project_id",
+    "company_name", "item_name", "item_type", "work_type", "date", "time_from", "time_to",
+    "gate", "vehicle_type", "vehicle_ton", "vehicle_count",
+    "driver_name", "driver_phone",
+    "worker_supervisor", "worker_guide", "worker_manager",
+    "loading_method", "notes",
+    "requester_name", "requester_role", "risk_level", "sic_training_url",
+]
+
+
+def req_insert(con: Client, data: Dict[str, Any]) -> str:
     rid = uuid.uuid4().hex
-    cur = con.cursor()
-    cols = [
-        "id", "created_at", "updated_at", "status", "kind", "project_id",
-        "company_name", "item_name", "item_type", "work_type", "date", "time_from", "time_to",
-        "gate", "vehicle_type", "vehicle_ton", "vehicle_count",
-        "driver_name", "driver_phone",
-        "worker_supervisor", "worker_guide", "worker_manager",
-        "loading_method", "notes",
-        "requester_name", "requester_role", "risk_level", "sic_training_url",
-    ]
     row = {
         "id": rid,
         "created_at": now_str(),
         "updated_at": now_str(),
         "status": "PENDING_APPROVAL",
-        **{k: data.get(k) for k in cols if k not in ["id", "created_at", "updated_at", "status"]},
+        **{k: data.get(k) for k in REQ_COLS
+           if k not in ("id", "created_at", "updated_at", "status")},
     }
-    cur.execute(
-        f"INSERT INTO requests({','.join(cols)}) VALUES({','.join(['?'] * len(cols))})",
-        [row.get(c) for c in cols],
-    )
-    con.commit()
+    row = {k: row[k] for k in REQ_COLS if k in row}
+    con.table("requests").insert(row).execute()
     return rid
 
 
-def req_get(con: sqlite3.Connection, rid: str) -> Optional[Dict[str, Any]]:
-    """Get a single request by ID, including day_seq for display ID."""
-    cur = con.cursor()
-    cur.execute(
-        """
-        WITH numbered AS (
-          SELECT *, ROW_NUMBER() OVER (
-            PARTITION BY project_id, date
-            ORDER BY date, created_at, id
-          ) AS day_seq
-          FROM requests
-        )
-        SELECT * FROM numbered WHERE id=?
-        """,
-        (rid,),
+def _rank_day_seq(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Assign `day_seq` per (project_id, date) partition — ordered by (date, created_at, id)."""
+    groups: Dict[tuple, List[Dict[str, Any]]] = {}
+    for r in rows:
+        key = (r.get("project_id") or "", r.get("date") or "")
+        groups.setdefault(key, []).append(r)
+    for bucket in groups.values():
+        bucket.sort(key=lambda x: (x.get("date") or "", x.get("created_at") or "", x.get("id") or ""))
+        for i, r in enumerate(bucket, 1):
+            r["day_seq"] = i
+    return rows
+
+
+def req_get(con: Client, rid: str) -> Optional[Dict[str, Any]]:
+    r = con.table("requests").select("*").eq("id", rid).limit(1).execute()
+    if not r.data:
+        return None
+    target = r.data[0]
+    pid = target.get("project_id") or ""
+    dt  = target.get("date") or ""
+    # fetch only same-partition rows for ranking efficiency
+    same = (
+        con.table("requests")
+        .select("*")
+        .eq("project_id", pid)
+        .eq("date", dt)
+        .execute()
     )
-    r = cur.fetchone()
-    return dict(r) if r else None
+    ranked = _rank_day_seq(same.data or [])
+    for row in ranked:
+        if row["id"] == rid:
+            return row
+    return target
 
 
 def req_list(
-    con: sqlite3.Connection,
+    con: Client,
     status: Optional[str] = None,
     kind: Optional[str] = None,
     limit: int = 300,
     project_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """List requests with optional filters, including day_seq for display ID."""
     import streamlit as st
     pid = project_id or st.session_state.get("PROJECT_ID", "")
-    w: List[str] = []
-    args: List[Any] = []
+
+    # fetch all requests for this project (needed for day_seq ranking)
+    q = con.table("requests").select("*")
     if pid:
-        w.append("project_id=?")
-        args.append(pid)
+        q = q.eq("project_id", pid)
+    all_rows = (q.execute().data or [])
+    _rank_day_seq(all_rows)
+
+    filtered = all_rows
     if status:
-        w.append("status=?")
-        args.append(status)
+        filtered = [r for r in filtered if r.get("status") == status]
     if kind:
-        w.append("kind=?")
-        args.append(kind)
-    where_clause = (" WHERE " + " AND ".join(w)) if w else ""
-    q = f"""
-        WITH numbered AS (
-          SELECT *, ROW_NUMBER() OVER (
-            PARTITION BY project_id, date
-            ORDER BY date, created_at, id
-          ) AS day_seq
-          FROM requests
-        )
-        SELECT * FROM numbered{where_clause}
-        ORDER BY created_at DESC LIMIT ?
-    """
-    args.append(limit)
-    cur = con.cursor()
-    cur.execute(q, args)
-    return [dict(x) for x in cur.fetchall()]
+        filtered = [r for r in filtered if r.get("kind") == kind]
+
+    filtered.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return filtered[:limit]
 
 
-def req_update_status(con: sqlite3.Connection, rid: str, status: str) -> None:
-    """Update the status of a request."""
-    cur = con.cursor()
-    cur.execute("UPDATE requests SET status=?, updated_at=? WHERE id=?", (status, now_str(), rid))
-    con.commit()
+def req_update_status(con: Client, rid: str, status: str) -> None:
+    con.table("requests").update({
+        "status": status, "updated_at": now_str(),
+    }).eq("id", rid).execute()
 
 
-def req_update_time(con: sqlite3.Connection, rid: str, time_from: str, time_to: str) -> None:
-    """Update time_from / time_to of a request."""
-    cur = con.cursor()
-    cur.execute(
-        "UPDATE requests SET time_from=?, time_to=?, updated_at=? WHERE id=?",
-        (time_from, time_to, now_str(), rid),
-    )
-    con.commit()
+def req_update_time(con: Client, rid: str, time_from: str, time_to: str) -> None:
+    con.table("requests").update({
+        "time_from": time_from, "time_to": time_to, "updated_at": now_str(),
+    }).eq("id", rid).execute()
 
 
-def req_delete(con: sqlite3.Connection, rid: str) -> None:
-    """Delete a request and all associated records (cascade)."""
-    cur = con.cursor()
-    cur.execute("DELETE FROM approvals   WHERE req_id=?", (rid,))
-    cur.execute("DELETE FROM executions  WHERE req_id=?", (rid,))
-    cur.execute("DELETE FROM photos      WHERE req_id=?", (rid,))
-    cur.execute("DELETE FROM outputs     WHERE req_id=?", (rid,))
-    cur.execute("DELETE FROM schedules   WHERE req_id=?", (rid,))
-    cur.execute("DELETE FROM requests    WHERE id=?",     (rid,))
-    con.commit()
+def req_delete(con: Client, rid: str) -> None:
+    """Delete a request and all associated records (manual cascade)."""
+    for table in ("approvals", "executions", "photos", "outputs", "schedules"):
+        con.table(table).delete().eq("req_id", rid).execute()
+    con.table("requests").delete().eq("id", rid).execute()

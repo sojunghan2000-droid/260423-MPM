@@ -1,9 +1,9 @@
-"""PDF generation functions."""
+"""PDF generation functions (Supabase Storage-aware)."""
 
-import sqlite3
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
+from supabase import Client
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
@@ -15,7 +15,6 @@ try:
 except Exception:
     pass
 
-# 한글 폰트 등록
 _FONT_NORMAL = "Helvetica"
 _FONT_BOLD   = "Helvetica-Bold"
 try:
@@ -38,12 +37,12 @@ except Exception:
     QR_AVAILABLE = False
 
 from shared.helpers import now_str
+from shared.storage import as_imagereader
 from config import KIND_IN, CHECK_ITEMS, APP_VERSION
 from modules.execution.crud import final_approved_signs
 
 
 def qr_generate_png(url: str, out_path: Path) -> Optional[Path]:
-    """Generate a QR code PNG from a URL."""
     if not QR_AVAILABLE:
         return None
     qrcode.make(url).save(out_path)
@@ -51,7 +50,6 @@ def qr_generate_png(url: str, out_path: Path) -> Optional[Path]:
 
 
 def pdf_simple_header(c: canvas.Canvas, title: str, subtitle: str = "") -> None:
-    """Draw a simple header on a PDF page."""
     c.setFont(_FONT_BOLD, 16)
     c.drawString(20 * mm, 287 * mm, title)
     if subtitle:
@@ -60,8 +58,7 @@ def pdf_simple_header(c: canvas.Canvas, title: str, subtitle: str = "") -> None:
     c.line(20 * mm, 278 * mm, 190 * mm, 278 * mm)
 
 
-def draw_signatures(c: canvas.Canvas, signs: List[Dict[str, Any]], y_mm: float) -> None:
-    """Draw signature images on a PDF page."""
+def draw_signatures(con: Client, c: canvas.Canvas, signs: List[Dict[str, Any]], y_mm: float) -> None:
     if not signs:
         c.setFont(_FONT_NORMAL, 9)
         c.drawString(20 * mm, y_mm * mm, "서명 없음")
@@ -72,37 +69,30 @@ def draw_signatures(c: canvas.Canvas, signs: List[Dict[str, Any]], y_mm: float) 
         c.setFont(_FONT_NORMAL, 9)
         c.drawString(x, y + 18, f"{s.get('role_required', '')} / {s.get('signer_name', '')}")
         c.drawString(x, y + 10, f"{s.get('signed_at', '')}")
-        if s.get("sign_png_path") and Path(s["sign_png_path"]).exists():
+        sig_img = as_imagereader(con, s.get("sign_png_path") or "")
+        if sig_img:
             try:
-                c.drawImage(
-                    ImageReader(str(s["sign_png_path"])),
-                    x, y - 6,
-                    width=28 * mm, height=12 * mm,
-                    preserveAspectRatio=True, mask="auto",
-                )
+                c.drawImage(sig_img, x, y - 6, width=28 * mm, height=12 * mm,
+                            preserveAspectRatio=True, mask="auto")
             except Exception:
                 pass
-        if s.get("stamp_png_path") and Path(s["stamp_png_path"]).exists():
+        stamp_img = as_imagereader(con, s.get("stamp_png_path") or "")
+        if stamp_img:
             try:
-                c.drawImage(
-                    ImageReader(str(s["stamp_png_path"])),
-                    x + 32 * mm, y - 6,
-                    width=14 * mm, height=14 * mm,
-                    preserveAspectRatio=True, mask="auto",
-                )
+                c.drawImage(stamp_img, x + 32 * mm, y - 6, width=14 * mm, height=14 * mm,
+                            preserveAspectRatio=True, mask="auto")
             except Exception:
                 pass
         x += 60 * mm
 
 
 def pdf_plan(
-    con: sqlite3.Connection,
+    con: Client,
     req: Dict[str, Any],
     approvals: List[Dict[str, Any]],
     out_path: Path,
     photos: Optional[List[Dict[str, Any]]] = None,
 ) -> Path:
-    """Generate the plan PDF (자재 반출입 계획서)."""
     c = canvas.Canvas(str(out_path), pagesize=A4)
     pdf_simple_header(
         c,
@@ -111,7 +101,6 @@ def pdf_plan(
     )
     y = 270 * mm
     c.setFont(_FONT_NORMAL, 10)
-    # gate 파싱
     gate_raw = req.get("gate", "")
     if "|" in gate_raw:
         _gp = gate_raw.split("|", 1)
@@ -119,12 +108,9 @@ def pdf_plan(
     else:
         gate_disp = gate_raw
 
-    # 차량 표시: 5톤(2대)
     vton = req.get("vehicle_ton", "")
     vcnt = req.get("vehicle_count", "")
     vehicle_disp = f"{vton}({vcnt}대)" if vton and vcnt else f"{vton}{vcnt}"
-
-    kind_txt = "반입" if req["kind"] == KIND_IN else "반출"
 
     fields = [
         ("회사명",          req.get("company_name", "")),
@@ -156,7 +142,7 @@ def pdf_plan(
             txt += f" · 사유: {ap.get('reject_reason', '')}"
         c.drawString(22 * mm, y, txt)
         y -= 6 * mm
-    # 우측 하단 서명
+
     sign_x = 150 * mm
     c.setFont(_FONT_BOLD, 11)
     c.drawString(sign_x, 42 * mm, "최종 승인 서명")
@@ -167,24 +153,26 @@ def pdf_plan(
         c.setFont(_FONT_NORMAL, 9)
         c.drawString(x, y + 18, f"{s.get('role_required', '')} / {s.get('signer_name', '')}")
         c.drawString(x, y + 10, f"{s.get('signed_at', '')}")
-        if s.get("sign_png_path") and Path(s["sign_png_path"]).exists():
+        sig_img = as_imagereader(con, s.get("sign_png_path") or "")
+        if sig_img:
             try:
-                c.drawImage(
-                    ImageReader(str(s["sign_png_path"])),
-                    x, y - 6,
-                    width=28 * mm, height=12 * mm,
-                    preserveAspectRatio=True, mask="auto",
-                )
+                c.drawImage(sig_img, x, y - 6, width=28 * mm, height=12 * mm,
+                            preserveAspectRatio=True, mask="auto")
             except Exception:
                 pass
         x += 60 * mm
     c.showPage()
 
-    # ── 사진대지 (2×2 표 형태, 가로 페이지) ─────────────────────────
     if photos:
-        valid = [p for p in photos if p.get("file_path") and Path(p["file_path"]).exists()]
+        valid = []
+        for p in photos:
+            key = p.get("storage_url") or p.get("file_path") or ""
+            img = as_imagereader(con, key)
+            if img:
+                valid.append((p, img))
+
         from reportlab.lib.pagesizes import landscape
-        pw, ph = landscape(A4)   # 가로: 297mm, 세로: 210mm
+        pw, ph = landscape(A4)
         margin_x = 12 * mm
         margin_y = 12 * mm
         gap = 5 * mm
@@ -205,7 +193,7 @@ def pdf_plan(
             c.line(margin_x, ph - 12 * mm, pw - margin_x, ph - 12 * mm)
 
             batch = valid[page_start:page_start + 4]
-            for i, photo in enumerate(batch):
+            for i, (photo, img) in enumerate(batch):
                 row, col = divmod(i, 2)
                 px, py = cell_pos(row, col)
                 label = f"[{photo.get('slot_key', '')}] {photo.get('label', '')}"
@@ -217,13 +205,9 @@ def pdf_plan(
                 pad = 2 * mm
                 try:
                     c.drawImage(
-                        ImageReader(str(photo["file_path"])),
-                        px + pad, py + pad,
-                        width=col_w - pad * 2,
-                        height=img_h - pad * 2,
-                        preserveAspectRatio=True,
-                        anchor='c',
-                        mask="auto",
+                        img, px + pad, py + pad,
+                        width=col_w - pad * 2, height=img_h - pad * 2,
+                        preserveAspectRatio=True, anchor='c', mask="auto",
                     )
                 except Exception:
                     c.setFont(_FONT_NORMAL, 9)
@@ -240,13 +224,12 @@ def pdf_plan(
 
 
 def pdf_permit(
-    con: sqlite3.Connection,
+    con: Client,
     req: Dict[str, Any],
     sic_url: str,
     qr_path: Optional[Path],
     out_path: Path,
 ) -> Path:
-    """Generate the permit PDF (자재 차량 진출입 허가증)."""
     c = canvas.Canvas(str(out_path), pagesize=A4)
     pdf_simple_header(c, "자재 차량 진출입 허가증", f"생성: {now_str()} · {APP_VERSION}")
     c.setFont(_FONT_NORMAL, 11)
@@ -287,19 +270,18 @@ def pdf_permit(
             c.drawString(20 * mm, 160 * mm, "(QR 삽입 실패)")
     c.setFont(_FONT_BOLD, 11)
     c.drawString(80 * mm, 145 * mm, "담당자 승인")
-    draw_signatures(c, final_approved_signs(con, req["id"])[-1:], 122)
+    draw_signatures(con, c, final_approved_signs(con, req["id"])[-1:], 122)
     c.showPage()
     c.save()
     return out_path
 
 
 def pdf_check_card(
-    con: sqlite3.Connection,
+    con: Client,
     req: Dict[str, Any],
     check_json: Dict[str, Any],
     out_path: Path,
 ) -> Path:
-    """Generate the check card PDF (자재 상/하차 점검카드)."""
     c = canvas.Canvas(str(out_path), pagesize=A4)
     pdf_simple_header(c, "자재 상/하차 점검카드", f"요청ID: {req['id']} · 생성: {now_str()} · {APP_VERSION}")
     c.setFont(_FONT_NORMAL, 10)
@@ -323,12 +305,11 @@ def pdf_check_card(
 
 
 def pdf_exec_summary(
-    con: sqlite3.Connection,
+    con: Client,
     req: Dict[str, Any],
     photos: List[Dict[str, Any]],
     out_path: Path,
 ) -> Path:
-    """Generate the execution summary PDF (실행 기록/사진 요약)."""
     c = canvas.Canvas(str(out_path), pagesize=A4)
     pdf_simple_header(c, "실행 기록(사진 요약)", f"요청ID: {req['id']} · 생성: {now_str()} · {APP_VERSION}")
     c.setFont(_FONT_NORMAL, 10)
@@ -348,7 +329,8 @@ def pdf_exec_summary(
     y -= 8 * mm
     c.setFont(_FONT_NORMAL, 10)
     for p in photos:
-        c.drawString(22 * mm, y, f"- [{p.get('slot_key', '')}] {p.get('label', '')} · {Path(p['file_path']).name}")
+        base = (p.get("storage_url") or p.get("file_path") or "").split("/")[-1]
+        c.drawString(22 * mm, y, f"- [{p.get('slot_key', '')}] {p.get('label', '')} · {base}")
         y -= 6 * mm
         if y < 20 * mm:
             c.showPage()

@@ -1,8 +1,8 @@
 """날짜별 대시보드 — 자재 상·하차 반입/반출 현황 테이블."""
 import io
-import sqlite3
 from datetime import date, timedelta
 import streamlit as st
+from supabase import Client
 from config import KIND_IN, KIND_OUT
 from db.models import settings_get
 
@@ -335,19 +335,20 @@ def _build_excel(reqs: list, site_name: str, date_label: str) -> bytes:
     return buf.read()
 
 
-def _req_list_for_date(con: sqlite3.Connection, project_id: str, target_date: str):
-    con.row_factory = sqlite3.Row
-    cur = con.cursor()
-    cur.execute(
-        """SELECT * FROM requests
-           WHERE project_id=? AND date=?
-           ORDER BY time_from, created_at""",
-        (project_id, target_date),
+def _req_list_for_date(con: Client, project_id: str, target_date: str):
+    r = (
+        con.table("requests")
+        .select("*")
+        .eq("project_id", project_id)
+        .eq("date", target_date)
+        .order("time_from")
+        .order("created_at")
+        .execute()
     )
-    return [dict(r) for r in cur.fetchall()]
+    return r.data or []
 
 
-def page_dashboard(con: sqlite3.Connection):
+def page_dashboard(con: Client):
     st.markdown(_DASH_CSS, unsafe_allow_html=True)
 
     project_id = st.session_state.get("PROJECT_ID", "")

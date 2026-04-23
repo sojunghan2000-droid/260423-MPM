@@ -1,42 +1,52 @@
-"""Hero header rendering."""
-import sqlite3
+"""Hero header rendering (Supabase-backed KPI aggregation in Python)."""
 import streamlit as st
 from datetime import date
+from supabase import Client
 from config import APP_VERSION, DEFAULT_SITE_NAME
 from db.models import settings_get
 
-def ui_header(con: sqlite3.Connection):
-    """Render hero header with KPI stats."""
-    # 프로젝트명 우선, 없으면 settings의 site_name 사용
+
+def _safe_int(v, default=0) -> int:
+    try:
+        return int(v) if v is not None and str(v).strip() != "" else default
+    except (ValueError, TypeError):
+        return default
+
+
+def ui_header(con: Client):
     site_name = st.session_state.get("PROJECT_NAME") or settings_get(con, "site_name", DEFAULT_SITE_NAME)
     user_name = st.session_state.get("USER_NAME", "")
     user_role = st.session_state.get("USER_ROLE", "")
     is_admin = st.session_state.get("IS_ADMIN", False)
     project_id = st.session_state.get("PROJECT_ID", "")
     today = date.today().isoformat()
-    cur = con.cursor()
-    cur.execute(
-        "SELECT"
-        " COUNT(*) AS total,"
-        " SUM(CASE WHEN status='PENDING_APPROVAL' THEN 1 ELSE 0 END) AS pending,"
-        " SUM(CASE WHEN status IN ('APPROVED','EXECUTING') THEN 1 ELSE 0 END) AS approved,"
-        " SUM(CASE WHEN status='DONE' THEN 1 ELSE 0 END) AS done,"
-        " SUM(COALESCE(vehicle_count,0)) AS total_v,"
-        " SUM(CASE WHEN status='PENDING_APPROVAL' THEN COALESCE(vehicle_count,0) ELSE 0 END) AS pending_v,"
-        " SUM(CASE WHEN status IN ('APPROVED','EXECUTING') THEN COALESCE(vehicle_count,0) ELSE 0 END) AS approved_v,"
-        " SUM(CASE WHEN status='DONE' THEN COALESCE(vehicle_count,0) ELSE 0 END) AS done_v"
-        " FROM requests WHERE project_id=? AND date=?",
-        (project_id, today),
+
+    rows_res = (
+        con.table("requests")
+        .select("status,vehicle_count")
+        .eq("project_id", project_id)
+        .eq("date", today)
+        .execute()
     )
-    row = cur.fetchone()
-    total    = (row["total"]    if row else 0) or 0
-    pending  = (row["pending"]  if row else 0) or 0
-    approved = (row["approved"] if row else 0) or 0
-    done     = (row["done"]     if row else 0) or 0
-    total_v    = (row["total_v"]    if row else 0) or 0
-    pending_v  = (row["pending_v"]  if row else 0) or 0
-    approved_v = (row["approved_v"] if row else 0) or 0
-    done_v     = (row["done_v"]     if row else 0) or 0
+    rows = rows_res.data or []
+
+    total = pending = approved = done = 0
+    total_v = pending_v = approved_v = done_v = 0
+    for r in rows:
+        s = r.get("status") or ""
+        vc = _safe_int(r.get("vehicle_count"), 0)
+        total   += 1
+        total_v += vc
+        if s == "PENDING_APPROVAL":
+            pending   += 1
+            pending_v += vc
+        elif s in ("APPROVED", "EXECUTING"):
+            approved   += 1
+            approved_v += vc
+        elif s == "DONE":
+            done   += 1
+            done_v += vc
+
     st.markdown(f"""
     <div class="hero">
       <div class="hero-content">

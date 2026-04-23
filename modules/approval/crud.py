@@ -1,69 +1,102 @@
-"""Approval CRUD operations."""
+"""Approval CRUD operations (Supabase-backed)."""
 
 import json
 import uuid
-import sqlite3
 from typing import Dict, Any, List, Optional, Tuple
 
+from supabase import Client
 from shared.helpers import now_str
 from db.models import settings_get
 from modules.request.crud import req_update_status
 
 
-def routing_get(con: sqlite3.Connection) -> Dict[str, List[str]]:
-    """Get the approval routing configuration."""
+def routing_get(con: Client) -> Dict[str, List[str]]:
     try:
         return json.loads(settings_get(con, "approval_routing_json", "{}"))
     except Exception:
         return {"IN": ["공사"], "OUT": ["안전", "공사"]}
 
 
-def approvals_create_default(con: sqlite3.Connection, rid: str, kind: str) -> None:
-    """Create default approval steps for a request based on its kind."""
+def approvals_create_default(con: Client, rid: str, kind: str) -> None:
     roles = routing_get(con).get(kind, ["공사"]) or ["공사"]
-    cur = con.cursor()
+    rows = []
     for i, role in enumerate(roles, start=1):
-        cur.execute(
-            "INSERT INTO approvals(id, req_id, step_no, role_required, status, created_at) VALUES(?,?,?,?,?,?)",
-            (uuid.uuid4().hex, rid, i, role, "PENDING", now_str()),
-        )
-    con.commit()
+        rows.append({
+            "id":            uuid.uuid4().hex,
+            "req_id":        rid,
+            "step_no":       i,
+            "role_required": role,
+            "status":        "PENDING",
+            "created_at":    now_str(),
+        })
+    if rows:
+        con.table("approvals").insert(rows).execute()
 
 
 def approvals_inbox(
-    con: sqlite3.Connection, user_role: str, is_admin: bool,
+    con: Client, user_role: str, is_admin: bool,
     project_id: str = "",
 ) -> List[Dict[str, Any]]:
-    """Get pending approvals for the current user's inbox."""
+    """Pending approvals — current step (min pending step_no) per request."""
     import streamlit as st
     pid = project_id or st.session_state.get("PROJECT_ID", "")
-    cur = con.cursor()
-    base = """
-    SELECT a.*, r.kind, r.company_name, r.item_name, r.date, r.time_from, r.time_to, r.gate, r.status AS req_status
-    FROM approvals a
-    JOIN requests r ON a.req_id=r.id
-    WHERE r.project_id=? AND a.status='PENDING' AND a.step_no = (
-      SELECT MIN(a2.step_no) FROM approvals a2 WHERE a2.req_id=a.req_id AND a2.status='PENDING'
+
+    reqs_res = con.table("requests").select("*").eq("project_id", pid).execute()
+    req_by_id = {r["id"]: r for r in (reqs_res.data or [])}
+    if not req_by_id:
+        return []
+
+    pend_res = (
+        con.table("approvals")
+        .select("*")
+        .eq("status", "PENDING")
+        .in_("req_id", list(req_by_id.keys()))
+        .execute()
     )
-    """
-    if is_admin:
-        q = base + " ORDER BY r.created_at DESC, a.step_no ASC"
-        cur.execute(q, (pid,))
-    else:
-        q = base + " AND a.role_required=? ORDER BY r.created_at DESC, a.step_no ASC"
-        cur.execute(q, (pid, user_role))
-    return [dict(x) for x in cur.fetchall()]
+    pend_by_req: Dict[str, List[Dict[str, Any]]] = {}
+    for a in (pend_res.data or []):
+        pend_by_req.setdefault(a["req_id"], []).append(a)
+
+    out: List[Dict[str, Any]] = []
+    for rid, pends in pend_by_req.items():
+        pends.sort(key=lambda x: x.get("step_no") or 0)
+        cur = pends[0]
+        if not is_admin and cur.get("role_required") != user_role:
+            continue
+        r = req_by_id.get(rid, {})
+        merged = {
+            **cur,
+            "kind":         r.get("kind"),
+            "company_name": r.get("company_name"),
+            "item_name":    r.get("item_name"),
+            "date":         r.get("date"),
+            "time_from":    r.get("time_from"),
+            "time_to":      r.get("time_to"),
+            "gate":         r.get("gate"),
+            "req_status":   r.get("status"),
+            "_req_created_at": r.get("created_at", ""),
+        }
+        out.append(merged)
+
+    out.sort(key=lambda x: (x.get("_req_created_at") or "", -(x.get("step_no") or 0)), reverse=True)
+    for o in out:
+        o.pop("_req_created_at", None)
+    return out
 
 
-def approvals_for_req(con: sqlite3.Connection, rid: str) -> List[Dict[str, Any]]:
-    """Get all approval steps for a given request."""
-    cur = con.cursor()
-    cur.execute("SELECT * FROM approvals WHERE req_id=? ORDER BY step_no ASC", (rid,))
-    return [dict(x) for x in cur.fetchall()]
+def approvals_for_req(con: Client, rid: str) -> List[Dict[str, Any]]:
+    r = (
+        con.table("approvals")
+        .select("*")
+        .eq("req_id", rid)
+        .order("step_no")
+        .execute()
+    )
+    return r.data or []
 
 
 def approval_mark(
-    con: sqlite3.Connection,
+    con: Client,
     approval_id: str,
     action: str,
     signer_name: str,
@@ -72,37 +105,49 @@ def approval_mark(
     stamp_path: Optional[str],
     reject_reason: str = "",
 ) -> Tuple[str, str]:
-    """Mark an approval as APPROVED or REJECTED."""
-    cur = con.cursor()
-    cur.execute("SELECT req_id, status FROM approvals WHERE id=?", (approval_id,))
-    row = cur.fetchone()
-    if not row:
+    cur = (
+        con.table("approvals")
+        .select("req_id,status")
+        .eq("id", approval_id)
+        .limit(1)
+        .execute()
+    )
+    if not cur.data:
         return "", "승인항목을 찾지 못했습니다."
+    row = cur.data[0]
     rid = row["req_id"]
     if row["status"] != "PENDING":
         return rid, "이미 처리된 승인입니다."
+
     if action == "APPROVE":
-        cur.execute(
-            """
-            UPDATE approvals SET status='APPROVED', signer_name=?, signer_role=?, sign_png_path=?, stamp_png_path=?, signed_at=?
-            WHERE id=?
-            """,
-            (signer_name, signer_role, sign_path, stamp_path, now_str(), approval_id),
+        con.table("approvals").update({
+            "status":         "APPROVED",
+            "signer_name":    signer_name,
+            "signer_role":    signer_role,
+            "sign_png_path":  sign_path,
+            "stamp_png_path": stamp_path,
+            "signed_at":      now_str(),
+        }).eq("id", approval_id).execute()
+
+        left_res = (
+            con.table("approvals")
+            .select("id", count="exact")
+            .eq("req_id", rid)
+            .eq("status", "PENDING")
+            .execute()
         )
-        con.commit()
-        cur.execute("SELECT COUNT(*) AS cnt FROM approvals WHERE req_id=? AND status='PENDING'", (rid,))
-        left = cur.fetchone()["cnt"]
+        left = left_res.count or 0
         if left == 0:
             req_update_status(con, rid, "APPROVED")
             return rid, "최종 승인 완료"
         return rid, "승인 완료(다음 승인자 대기)"
-    cur.execute(
-        """
-        UPDATE approvals SET status='REJECTED', signer_name=?, signer_role=?, reject_reason=?, signed_at=?
-        WHERE id=?
-        """,
-        (signer_name, signer_role, reject_reason, now_str(), approval_id),
-    )
-    con.commit()
+
+    con.table("approvals").update({
+        "status":        "REJECTED",
+        "signer_name":   signer_name,
+        "signer_role":   signer_role,
+        "reject_reason": reject_reason,
+        "signed_at":     now_str(),
+    }).eq("id", approval_id).execute()
     req_update_status(con, rid, "REJECTED")
     return rid, "반려 처리 완료"

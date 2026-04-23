@@ -1,9 +1,9 @@
-"""Approval (signature) page."""
+"""Approval (signature) page (Supabase-backed)."""
 
-import sqlite3
 from datetime import date as _date
 
 import streamlit as st
+from supabase import Client
 
 from modules.approval.crud import approvals_inbox, approval_mark
 from modules.request.crud import req_get
@@ -12,28 +12,49 @@ from shared.signature import ui_signature_block
 from shared.helpers import req_display_id
 
 
-def _pending_my_requests(con: sqlite3.Connection, project_id: str, user_name: str):
-    """협력사 사용자가 등록한 요청 중 승인 대기 중인 건 조회."""
-    cur = con.cursor()
-    cur.execute(
-        """
-        SELECT r.id, r.company_name, r.item_name, r.kind, r.date, r.time_from, r.time_to, r.gate,
-               r.status, r.created_at,
-               a.role_required, a.status AS ap_status, a.step_no
-        FROM requests r
-        LEFT JOIN approvals a ON a.req_id=r.id
-          AND a.step_no = (
-            SELECT MIN(a2.step_no) FROM approvals a2 WHERE a2.req_id=r.id AND a2.status='PENDING'
-          )
-        WHERE r.project_id=? AND r.requester_name=? AND r.status='PENDING_APPROVAL'
-        ORDER BY r.created_at DESC
-        """,
-        (project_id, user_name),
-    )
-    return [dict(x) for x in cur.fetchall()]
+def _pending_my_requests(con: Client, project_id: str, user_name: str):
+    """협력사가 등록한 요청 중 승인 대기 건 — 가장 낮은 PENDING 단계 정보 병합."""
+    reqs = (
+        con.table("requests")
+        .select("id,company_name,item_name,kind,date,time_from,time_to,gate,status,created_at,requester_name")
+        .eq("project_id", project_id)
+        .eq("requester_name", user_name)
+        .eq("status", "PENDING_APPROVAL")
+        .execute()
+    ).data or []
+    if not reqs:
+        return []
+
+    rids = [r["id"] for r in reqs]
+    appr_pend = (
+        con.table("approvals")
+        .select("req_id,role_required,status,step_no")
+        .eq("status", "PENDING")
+        .in_("req_id", rids)
+        .execute()
+    ).data or []
+
+    min_pend: dict = {}
+    for a in appr_pend:
+        rid = a["req_id"]
+        cur = min_pend.get(rid)
+        if cur is None or (a.get("step_no") or 0) < (cur.get("step_no") or 0):
+            min_pend[rid] = a
+
+    out = []
+    for r in reqs:
+        ap = min_pend.get(r["id"], {})
+        out.append({
+            **r,
+            "role_required": ap.get("role_required"),
+            "ap_status":     ap.get("status"),
+            "step_no":       ap.get("step_no"),
+        })
+    out.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return out
 
 
-def page_approval(con: sqlite3.Connection):
+def page_approval(con: Client):
     st.markdown("### ✍️ 승인(서명)")
 
     user_role = st.session_state.get("USER_ROLE", "")
@@ -45,7 +66,6 @@ def page_approval(con: sqlite3.Connection):
     _today = _date.today().isoformat()
     inbox = [i for i in inbox if i.get("date", "") >= _today]
 
-    # ── 협력사: 서명 권한 없음 → 본인 요청의 대기 현황만 표시 ──────────────
     if not inbox and user_role == "협력사":
         pending = _pending_my_requests(con, project_id, user_name)
         if not pending:
@@ -54,7 +74,6 @@ def page_approval(con: sqlite3.Connection):
 
         st.caption("📋 내가 등록한 요청 중 승인 대기 중인 건")
         KIND_LABEL = {"IN": "반입", "OUT": "반출"}
-        STATUS_COLOR = {"PENDING_APPROVAL": "#f59e0b"}
 
         for r in pending:
             kind_lbl = KIND_LABEL.get(r.get("kind", ""), r.get("kind", ""))
@@ -77,7 +96,6 @@ def page_approval(con: sqlite3.Connection):
             )
         return
 
-    # ── 승인 권한 있는 계정 ───────────────────────────────────────────────
     if not inbox:
         st.info("대기 중인 승인 건이 없습니다.")
         return
@@ -109,7 +127,7 @@ def page_approval(con: sqlite3.Connection):
     }
     </style>
     """, unsafe_allow_html=True)
-    sign_path, stamp_path = ui_signature_block(rid, "서명 입력", key_prefix=f"ap_{approval_id}")
+    sign_path, stamp_path = ui_signature_block(con, rid, "서명 입력", key_prefix=f"ap_{approval_id}")
     reject_reason = st.text_area("반려 사유(반려 시)", height=60)
     st.markdown("""
     <style>

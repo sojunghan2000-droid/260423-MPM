@@ -1,11 +1,11 @@
 """Module management UI for toggling project modules per role."""
 
-import sqlite3
 import streamlit as st
+from supabase import Client
 from db.models import modules_for_project, module_toggle, module_toggle_role
 
 
-def render_module_manager(con: sqlite3.Connection, project_id: str):
+def render_module_manager(con: Client, project_id: str):
     st.markdown("#### 📦 기능 모듈 설정")
     st.markdown("""<style>
     /* ── 토글 셀 컨테이너: flex 중앙 정렬 ── */

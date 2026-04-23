@@ -1,24 +1,24 @@
-"""Daily summary component."""
-import sqlite3
+"""Daily summary component (Supabase-backed)."""
 import streamlit as st
 from datetime import date
 from typing import List, Dict, Any
+from supabase import Client
 from config import KIND_IN, KIND_OUT
 
 
-def render_daily_summary(schedules: List[Dict[str, Any]], con: sqlite3.Connection = None):
-    """Render daily summary card — counts based on today's requests (date field)."""
+def render_daily_summary(schedules: List[Dict[str, Any]], con: Client = None):
     today = date.today().isoformat()
 
     if con is not None:
-        # 금일 반입예정일 기준 요청 집계
         pid = st.session_state.get("PROJECT_ID", "")
-        cur = con.cursor()
-        cur.execute(
-            "SELECT kind, gate FROM requests WHERE project_id=? AND date=?",
-            (pid, today),
+        r = (
+            con.table("requests")
+            .select("kind,gate")
+            .eq("project_id", pid)
+            .eq("date", today)
+            .execute()
         )
-        rows = [dict(r) for r in cur.fetchall()]
+        rows = r.data or []
     else:
         rows = [s for s in schedules if (s.get("date") or "")[:10] == today]
 

@@ -1,73 +1,61 @@
-"""CRUD for projects and project_modules tables."""
-import sqlite3
+"""CRUD for projects and project_modules tables (Supabase-backed)."""
 import uuid
 from typing import Optional, List, Dict, Any
+from supabase import Client
 from shared.helpers import now_str
 
 
 # ── Settings ──────────────────────────────────────────────────────────
 
-def settings_get(con: sqlite3.Connection, key: str, default: str = "") -> str:
-    cur = con.cursor()
-    cur.execute("SELECT value FROM settings WHERE key=?", (key,))
-    r = cur.fetchone()
-    return r["value"] if r else default
+def settings_get(con: Client, key: str, default: str = "") -> str:
+    r = con.table("settings").select("value").eq("key", key).limit(1).execute()
+    return r.data[0]["value"] if r.data else default
 
 
-def settings_set(con: sqlite3.Connection, key: str, value: str) -> None:
-    cur = con.cursor()
-    cur.execute("""
-    INSERT INTO settings(key,value,updated_at) VALUES(?,?,?)
-    ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
-    """, (key, value, now_str()))
-    con.commit()
+def settings_set(con: Client, key: str, value: str) -> None:
+    con.table("settings").upsert({
+        "key": key,
+        "value": value,
+        "updated_at": now_str(),
+    }, on_conflict="key").execute()
 
 
 # ── Projects ──────────────────────────────────────────────────────────
 
-def project_create(con: sqlite3.Connection, name: str, description: str,
+def project_create(con: Client, name: str, description: str,
                    site_pin: str, admin_pin: str) -> str:
-    """Create a project and insert default modules. Returns project id."""
     pid = uuid.uuid4().hex
     ts = now_str()
-    cur = con.cursor()
-    cur.execute("""
-    INSERT INTO projects(id, name, description, site_pin, admin_pin, created_at)
-    VALUES(?,?,?,?,?,?)
-    """, (pid, name, description, site_pin, admin_pin, ts))
-    con.commit()
+    con.table("projects").insert({
+        "id": pid,
+        "name": name,
+        "description": description,
+        "site_pin": site_pin,
+        "admin_pin": admin_pin,
+        "created_at": ts,
+    }).execute()
     modules_init_for_project(con, pid)
     return pid
 
 
-def project_list(con: sqlite3.Connection) -> List[Dict[str, Any]]:
-    """List all projects."""
-    cur = con.cursor()
-    cur.execute("SELECT * FROM projects ORDER BY created_at DESC")
-    return [dict(r) for r in cur.fetchall()]
+def project_list(con: Client) -> List[Dict[str, Any]]:
+    r = con.table("projects").select("*").order("created_at", desc=True).execute()
+    return r.data or []
 
 
-def project_get(con: sqlite3.Connection, project_id: str) -> Optional[Dict[str, Any]]:
-    """Get a single project by id."""
-    cur = con.cursor()
-    cur.execute("SELECT * FROM projects WHERE id=?", (project_id,))
-    r = cur.fetchone()
-    return dict(r) if r else None
+def project_get(con: Client, project_id: str) -> Optional[Dict[str, Any]]:
+    r = con.table("projects").select("*").eq("id", project_id).limit(1).execute()
+    return r.data[0] if r.data else None
 
 
-def project_update(con: sqlite3.Connection, project_id: str, **kwargs) -> None:
-    """Update project fields."""
+def project_update(con: Client, project_id: str, **kwargs) -> None:
     if not kwargs:
         return
     allowed = {"name", "description", "site_pin", "admin_pin"}
     fields = {k: v for k, v in kwargs.items() if k in allowed}
     if not fields:
         return
-    set_clause = ", ".join(f"{k}=?" for k in fields)
-    values = list(fields.values()) + [project_id]
-    cur = con.cursor()
-    cur.execute(f"UPDATE projects SET {set_clause} WHERE id=?", values)
-    con.commit()
+    con.table("projects").update(fields).eq("id", project_id).execute()
 
 
 # ── Project Modules ───────────────────────────────────────────────────
@@ -82,66 +70,71 @@ DEFAULT_MODULES = [
 ]
 
 
-def modules_init_for_project(con: sqlite3.Connection, project_id: str) -> None:
-    """Insert default modules for a new project."""
-    cur = con.cursor()
-    ts = now_str()
+def modules_init_for_project(con: Client, project_id: str) -> None:
+    """Insert default modules for a new project — skip if already present."""
+    existing = con.table("project_modules").select("module_key").eq("project_id", project_id).execute()
+    have = {r["module_key"] for r in (existing.data or [])}
+    rows = []
     for key, module_name, module_desc, enabled, sort_order in DEFAULT_MODULES:
-        cur.execute("""
-        INSERT OR IGNORE INTO project_modules(project_id, module_key, module_name, module_desc, enabled, sort_order)
-        VALUES(?,?,?,?,?,?)
-        """, (project_id, key, module_name, module_desc, enabled, sort_order))
-    con.commit()
+        if key in have:
+            continue
+        rows.append({
+            "project_id": project_id,
+            "module_key": key,
+            "module_name": module_name,
+            "module_desc": module_desc,
+            "enabled": enabled,
+            "sort_order": sort_order,
+            "enabled_admin": 1,
+            "enabled_user": 1,
+        })
+    if rows:
+        con.table("project_modules").insert(rows).execute()
 
 
-def modules_for_project(con: sqlite3.Connection, project_id: str) -> List[Dict[str, Any]]:
-    """Get all modules for a project, ordered by sort_order."""
-    cur = con.cursor()
-    cur.execute(
-        "SELECT * FROM project_modules WHERE project_id=? ORDER BY sort_order",
-        (project_id,),
+def modules_for_project(con: Client, project_id: str) -> List[Dict[str, Any]]:
+    r = (
+        con.table("project_modules")
+        .select("*")
+        .eq("project_id", project_id)
+        .order("sort_order")
+        .execute()
     )
-    return [dict(r) for r in cur.fetchall()]
+    return r.data or []
 
 
 def modules_enabled_for_project(
-    con: sqlite3.Connection, project_id: str, is_admin: bool = False
+    con: Client, project_id: str, is_admin: bool = False
 ) -> List[Dict[str, Any]]:
-    """Get enabled modules for a project, filtered by role."""
-    cur = con.cursor()
     col = "enabled_admin" if is_admin else "enabled_user"
-    # fallback: if column doesn't exist yet, use enabled
-    try:
-        cur.execute(
-            f"SELECT * FROM project_modules WHERE project_id=? AND enabled=1 AND {col}=1 ORDER BY sort_order",
-            (project_id,),
-        )
-    except Exception:
-        cur.execute(
-            "SELECT * FROM project_modules WHERE project_id=? AND enabled=1 ORDER BY sort_order",
-            (project_id,),
-        )
-    return [dict(r) for r in cur.fetchall()]
+    r = (
+        con.table("project_modules")
+        .select("*")
+        .eq("project_id", project_id)
+        .eq("enabled", 1)
+        .eq(col, 1)
+        .order("sort_order")
+        .execute()
+    )
+    return r.data or []
 
 
-def module_toggle_role(
-    con: sqlite3.Connection, project_id: str, module_key: str, role: str, enabled: int
-) -> None:
-    """Toggle a module on/off for a specific role ('admin' or 'user')."""
+def module_toggle_role(con: Client, project_id: str, module_key: str, role: str, enabled: int) -> None:
     col = "enabled_admin" if role == "admin" else "enabled_user"
-    cur = con.cursor()
-    cur.execute(
-        f"UPDATE project_modules SET {col}=? WHERE project_id=? AND module_key=?",
-        (enabled, project_id, module_key),
+    (
+        con.table("project_modules")
+        .update({col: enabled})
+        .eq("project_id", project_id)
+        .eq("module_key", module_key)
+        .execute()
     )
-    con.commit()
 
 
-def module_toggle(con: sqlite3.Connection, project_id: str, module_key: str, enabled: int) -> None:
-    """Toggle a module on/off for a project."""
-    cur = con.cursor()
-    cur.execute(
-        "UPDATE project_modules SET enabled=? WHERE project_id=? AND module_key=?",
-        (enabled, project_id, module_key),
+def module_toggle(con: Client, project_id: str, module_key: str, enabled: int) -> None:
+    (
+        con.table("project_modules")
+        .update({"enabled": enabled})
+        .eq("project_id", project_id)
+        .eq("module_key", module_key)
+        .execute()
     )
-    con.commit()

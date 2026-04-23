@@ -1,110 +1,130 @@
-"""Execution CRUD operations."""
+"""Execution CRUD operations (Supabase-backed)."""
 
 import json
 import uuid
-import sqlite3
 from typing import Dict, Any, List, Optional
 
+import streamlit as st
+from supabase import Client
+
 from shared.helpers import now_str, file_sha1
-from db.connection import path_output
+from shared.storage import (
+    upload_bytes, photo_key as build_photo_key,
+    signed_url, delete_key,
+)
 from config import EXEC_REQUIRED_PHOTOS
 
 
-def photo_exists_same(con: sqlite3.Connection, rid: str, slot_key: str, file_hash: str) -> bool:
-    """Check if a photo with the same hash already exists for the given slot."""
-    cur = con.cursor()
-    cur.execute(
-        "SELECT 1 FROM photos WHERE req_id=? AND slot_key=? AND file_hash=? LIMIT 1",
-        (rid, slot_key, file_hash),
+def photo_exists_same(con: Client, rid: str, slot_key: str, file_hash: str) -> bool:
+    r = (
+        con.table("photos")
+        .select("id")
+        .eq("req_id", rid)
+        .eq("slot_key", slot_key)
+        .eq("file_hash", file_hash)
+        .limit(1)
+        .execute()
     )
-    return cur.fetchone() is not None
+    return bool(r.data)
 
 
 def photo_add(
-    con: sqlite3.Connection,
+    con: Client,
     rid: str,
     slot_key: str,
     label: str,
     file_bytes: bytes,
     suffix: str = ".jpg",
 ) -> str:
-    """Add a photo for a request. Returns file path or empty string if duplicate."""
+    """Upload to Supabase Storage; insert photos row. Returns storage key or '' if dup."""
     fhash = file_sha1(file_bytes)
     if photo_exists_same(con, rid, slot_key, fhash):
         return ""
-    out = path_output()["photo"]
-    fname = f"{rid}{slot_key}{uuid.uuid4().hex[:8]}{suffix}"
-    fpath = out / fname
-    fpath.write_bytes(file_bytes)
-    cur = con.cursor()
-    cur.execute(
-        "INSERT INTO photos(id, req_id, slot_key, label, file_path, file_hash, created_at) VALUES(?,?,?,?,?,?,?)",
-        (uuid.uuid4().hex, rid, slot_key, label, str(fpath), fhash, now_str()),
-    )
-    con.commit()
-    return str(fpath)
+
+    project_id = st.session_state.get("PROJECT_ID", "")
+    key = build_photo_key(project_id, rid, slot_key, suffix)
+    content_type = "image/jpeg" if suffix.lower() in (".jpg", ".jpeg") else "image/png"
+    upload_bytes(con, key, file_bytes, content_type)
+
+    con.table("photos").insert({
+        "id":          uuid.uuid4().hex,
+        "req_id":      rid,
+        "slot_key":    slot_key,
+        "label":       label,
+        "file_path":   key,
+        "storage_url": key,
+        "file_hash":   fhash,
+        "created_at":  now_str(),
+    }).execute()
+    return key
 
 
-def photo_delete_slot(con: sqlite3.Connection, rid: str, slot_key: str) -> None:
-    """Delete photo record(s) for a given slot and remove file(s) from disk."""
-    cur = con.cursor()
-    cur.execute("SELECT file_path FROM photos WHERE req_id=? AND slot_key=?", (rid, slot_key))
-    rows = cur.fetchall()
+def photo_delete_slot(con: Client, rid: str, slot_key: str) -> None:
+    rows = (
+        con.table("photos")
+        .select("id,file_path,storage_url")
+        .eq("req_id", rid)
+        .eq("slot_key", slot_key)
+        .execute()
+    ).data or []
     for row in rows:
-        try:
-            Path(row["file_path"]).unlink(missing_ok=True)
-        except Exception:
-            pass
-    cur.execute("DELETE FROM photos WHERE req_id=? AND slot_key=?", (rid, slot_key))
-    con.commit()
+        k = row.get("storage_url") or row.get("file_path") or ""
+        delete_key(con, k)
+    con.table("photos").delete().eq("req_id", rid).eq("slot_key", slot_key).execute()
 
 
-def photos_for_req(con: sqlite3.Connection, rid: str) -> List[Dict[str, Any]]:
-    """Get all photos for a given request."""
-    cur = con.cursor()
-    cur.execute("SELECT * FROM photos WHERE req_id=? ORDER BY created_at ASC", (rid,))
-    return [dict(x) for x in cur.fetchall()]
+def photos_for_req(con: Client, rid: str) -> List[Dict[str, Any]]:
+    r = (
+        con.table("photos")
+        .select("*")
+        .eq("req_id", rid)
+        .order("created_at")
+        .execute()
+    )
+    rows = r.data or []
+    for p in rows:
+        key = p.get("storage_url") or p.get("file_path") or ""
+        p["display_url"] = signed_url(con, key) if key else ""
+    return rows
 
 
-def required_photos_ok(con: sqlite3.Connection, rid: str) -> bool:
-    """Check if all required photos have been uploaded for a request."""
+def required_photos_ok(con: Client, rid: str) -> bool:
     keys = {p["slot_key"] for p in photos_for_req(con, rid)}
     return all(k in keys for k, _ in EXEC_REQUIRED_PHOTOS)
 
 
 def execution_upsert(
-    con: sqlite3.Connection,
+    con: Client,
     rid: str,
     executed_by: str,
     executed_role: str,
     check_json: Dict[str, Any],
     notes: str,
 ) -> None:
-    """Insert or update an execution record."""
     ok = 1 if required_photos_ok(con, rid) else 0
-    cur = con.cursor()
-    cur.execute(
-        """
-        INSERT INTO executions(req_id, executed_by, executed_role, executed_at, check_json, required_photo_ok, notes)
-        VALUES(?,?,?,?,?,?,?)
-        ON CONFLICT(req_id) DO UPDATE SET executed_by=excluded.executed_by, executed_role=excluded.executed_role,
-          executed_at=excluded.executed_at, check_json=excluded.check_json, required_photo_ok=excluded.required_photo_ok, notes=excluded.notes
-        """,
-        (rid, executed_by, executed_role, now_str(), json.dumps(check_json, ensure_ascii=False), ok, notes),
+    con.table("executions").upsert({
+        "req_id":            rid,
+        "executed_by":       executed_by,
+        "executed_role":     executed_role,
+        "executed_at":       now_str(),
+        "check_json":        json.dumps(check_json, ensure_ascii=False),
+        "required_photo_ok": ok,
+        "notes":             notes,
+    }, on_conflict="req_id").execute()
+
+
+def execution_get(con: Client, rid: str) -> Optional[Dict[str, Any]]:
+    r = con.table("executions").select("*").eq("req_id", rid).limit(1).execute()
+    return r.data[0] if r.data else None
+
+
+def final_approved_signs(con: Client, rid: str) -> List[Dict[str, Any]]:
+    r = (
+        con.table("approvals")
+        .select("*")
+        .eq("req_id", rid)
+        .eq("status", "APPROVED")
+        .order("step_no")
+        .execute()
     )
-    con.commit()
-
-
-def execution_get(con: sqlite3.Connection, rid: str) -> Optional[Dict[str, Any]]:
-    """Get the execution record for a request."""
-    cur = con.cursor()
-    cur.execute("SELECT * FROM executions WHERE req_id=?", (rid,))
-    r = cur.fetchone()
-    return dict(r) if r else None
-
-
-def final_approved_signs(con: sqlite3.Connection, rid: str) -> List[Dict[str, Any]]:
-    """Get all approved signatures for a request."""
-    cur = con.cursor()
-    cur.execute("SELECT * FROM approvals WHERE req_id=? AND status='APPROVED' ORDER BY step_no ASC", (rid,))
-    return [dict(x) for x in cur.fetchall()]
+    return r.data or []

@@ -1,14 +1,13 @@
-"""Signature and stamp capture UI components."""
+"""Signature and stamp capture UI components (Supabase Storage-backed)."""
 
-import uuid
-import sqlite3
 from pathlib import Path
 from typing import Optional, Tuple
 
 import streamlit as st
+from supabase import Client
 
-from db.connection import path_output
 from shared.helpers import bytes_from_camera_or_upload, png_bytes_from_canvas_rgba
+from shared.storage import upload_bytes, sign_key, stamp_key
 
 CANVAS_AVAILABLE = True
 try:
@@ -17,15 +16,19 @@ except Exception:
     CANVAS_AVAILABLE = False
 
 
-def save_bytes_to_file(folder_key: str, rid: str, tag: str, data: bytes, suffix: str) -> str:
-    """Save raw bytes into the output folder and return the file path."""
-    out = path_output()[folder_key]
-    fp = out / f"{rid}_{tag}_{uuid.uuid4().hex[:8]}{suffix}"
-    fp.write_bytes(data)
-    return str(fp)
+def save_bytes_to_storage(con: Client, folder_key: str, data: bytes, suffix: str) -> str:
+    """Upload raw bytes to Supabase Storage and return the object key."""
+    project_id = st.session_state.get("PROJECT_ID", "")
+    if folder_key == "stamp":
+        key = stamp_key(project_id, suffix)
+        ct = "image/png" if suffix.lower() == ".png" else "image/jpeg"
+    else:
+        key = sign_key(project_id, suffix)
+        ct = "image/png" if suffix.lower() == ".png" else "image/jpeg"
+    return upload_bytes(con, key, data, ct)
 
 
-def ui_signature_block(rid: str, label: str, key_prefix: str) -> Tuple[Optional[str], Optional[str]]:
+def ui_signature_block(con: Client, rid: str, label: str, key_prefix: str) -> Tuple[Optional[str], Optional[str]]:
     """Render signature + stamp upload block. Returns (sign_path, stamp_path)."""
     st.markdown(f"#### {label}")
     st.markdown("""
@@ -199,7 +202,7 @@ def ui_signature_block(rid: str, label: str, key_prefix: str) -> Tuple[Optional[
                         if not png:
                             st.session_state[f"{key_prefix}_save_msg"] = ("error", "서명 저장 실패")
                         else:
-                            sign_path = save_bytes_to_file("sign", rid, "sign_draw", png, ".png")
+                            sign_path = save_bytes_to_storage(con, "sign", png, ".png")
                             st.session_state[f"{key_prefix}_sign_path"] = sign_path
                             st.session_state[f"{key_prefix}_save_msg"] = ("success", "서명 저장 완료")
             with colB:
@@ -239,7 +242,7 @@ def ui_signature_block(rid: str, label: str, key_prefix: str) -> Tuple[Optional[
                 data = bytes_from_camera_or_upload(upl)
                 if data:
                     suffix = Path(upl.name).suffix.lower() or ".png"
-                    sign_path = save_bytes_to_file("sign", rid, "sign_upl", data, suffix)
+                    sign_path = save_bytes_to_storage(con, "sign", data, suffix)
                     st.session_state[f"{key_prefix}_sign_path"] = sign_path
                     st.session_state[f"{key_prefix}_sign_preview"] = {"data": data, "name": upl.name}
                     st.session_state[f"{key_prefix}_sign_editing"] = False

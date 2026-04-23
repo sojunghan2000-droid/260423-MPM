@@ -26,9 +26,10 @@ def _insert_extra_slots(con, project_id, sel_list, add_slots, kind_val, gate,
     sdate    = ref.get("schedule_date", "")
     if not rid or not sdate:
         return 0
-    _cur = con.cursor()
-    _cur.execute("SELECT time_from FROM schedules WHERE req_id=? AND schedule_date=?", (rid, sdate))
-    existing_tf = {r[0] for r in _cur.fetchall()}
+    _rows = (
+        con.table("schedules").select("time_from").eq("req_id", rid).eq("schedule_date", sdate).execute()
+    ).data or []
+    existing_tf = {r["time_from"] for r in _rows}
     n_added = 0
     for slot in add_slots:
         if slot in existing_tf:
@@ -54,20 +55,18 @@ def _insert_extra_slots(con, project_id, sel_list, add_slots, kind_val, gate,
             "created_by":    created_by,
         })
         n_added += 1
-    # request time_from/time_to 범위 갱신
     if n_added:
-        _cur.execute(
-            "SELECT time_from FROM schedules WHERE req_id=? AND schedule_date=? ORDER BY time_from",
-            (rid, sdate),
-        )
-        all_tf = [r[0] for r in _cur.fetchall()]
+        _all_tf_rows = (
+            con.table("schedules").select("time_from").eq("req_id", rid)
+            .eq("schedule_date", sdate).order("time_from").execute()
+        ).data or []
+        all_tf = [r["time_from"] for r in _all_tf_rows]
         if all_tf:
             last_idx = TIME_SLOTS.index(all_tf[-1]) if all_tf[-1] in TIME_SLOTS else 0
-            con.cursor().execute(
-                "UPDATE requests SET time_from=?, time_to=? WHERE id=?",
-                (all_tf[0], TIME_SLOTS[min(last_idx + 1, len(TIME_SLOTS) - 1)], rid),
-            )
-            con.commit()
+            con.table("requests").update({
+                "time_from": all_tf[0],
+                "time_to":   TIME_SLOTS[min(last_idx + 1, len(TIME_SLOTS) - 1)],
+            }).eq("id", rid).execute()
     return n_added
 
 
@@ -177,12 +176,10 @@ def page_schedule(con):
         start_fi = max(0, drop_fi - drag_index)
         date_str = str(st.session_state.get("sched_current_date", date.today()))
         if req_id:
-            _cur = con.cursor()
-            _cur.execute(
-                "SELECT * FROM schedules WHERE req_id=? AND schedule_date=? ORDER BY time_from",
-                (req_id, date_str),
-            )
-            group = [dict(r) for r in _cur.fetchall()]
+            group = (
+                con.table("schedules").select("*").eq("req_id", req_id)
+                .eq("schedule_date", date_str).order("time_from").execute()
+            ).data or []
             for i, sched in enumerate(group):
                 nfi = start_fi + i
                 if nfi + 1 >= len(TIME_SLOTS):
@@ -191,11 +188,10 @@ def page_schedule(con):
                                 time_from=TIME_SLOTS[nfi], time_to=TIME_SLOTS[nfi + 1])
             if group:
                 actual_end = min(start_fi + len(group), len(TIME_SLOTS) - 1)
-                _cur.execute(
-                    "UPDATE requests SET time_from=?, time_to=? WHERE id=?",
-                    (TIME_SLOTS[start_fi], TIME_SLOTS[actual_end], req_id),
-                )
-                con.commit()
+                con.table("requests").update({
+                    "time_from": TIME_SLOTS[start_fi],
+                    "time_to":   TIME_SLOTS[actual_end],
+                }).eq("id", req_id).execute()
         else:
             nf = TIME_SLOTS[drop_fi]
             nt = TIME_SLOTS[min(drop_fi + 1, len(TIME_SLOTS) - 1)]
@@ -209,19 +205,16 @@ def page_schedule(con):
         if del_sched:
             req_id   = del_sched.get("req_id")
             date_str = del_sched.get("schedule_date")
-            _cur = con.cursor()
-            _cur.execute(
-                "SELECT * FROM schedules WHERE req_id=? AND schedule_date=? AND id!=? ORDER BY time_from",
-                (req_id, date_str, sid),
-            )
-            remaining = [dict(r) for r in _cur.fetchall()]
+            remaining = (
+                con.table("schedules").select("*").eq("req_id", req_id)
+                .eq("schedule_date", date_str).neq("id", sid).order("time_from").execute()
+            ).data or []
             schedule_delete(con, sid)
             if remaining and req_id:
-                _cur.execute(
-                    "UPDATE requests SET time_from=?, time_to=? WHERE id=?",
-                    (remaining[0]["time_from"], remaining[-1]["time_to"], req_id),
-                )
-                con.commit()
+                con.table("requests").update({
+                    "time_from": remaining[0]["time_from"],
+                    "time_to":   remaining[-1]["time_to"],
+                }).eq("id", req_id).execute()
         for k in _ADMIN_KEYS:
             st.session_state.pop(k, None)
         st.session_state.pop("sched_edit_from_home", None)
@@ -254,12 +247,10 @@ def page_schedule(con):
                 if _req_id in _seen:
                     continue
                 _seen.add(_req_id)
-                _cur = con.cursor()
-                _cur.execute(
-                    "SELECT * FROM schedules WHERE req_id=? AND schedule_date=? ORDER BY time_from",
-                    (_req_id, _mv_date),
-                )
-                _group = [dict(r) for r in _cur.fetchall()]
+                _group = (
+                    con.table("schedules").select("*").eq("req_id", _req_id)
+                    .eq("schedule_date", _mv_date).order("time_from").execute()
+                ).data or []
                 for i, _sched in enumerate(_group):
                     nfi = start_fi + i
                     if nfi + 1 >= len(TIME_SLOTS):
@@ -268,11 +259,10 @@ def page_schedule(con):
                                     time_from=TIME_SLOTS[nfi], time_to=TIME_SLOTS[nfi + 1])
                 if _group:
                     _actual_end = min(start_fi + len(_group), len(TIME_SLOTS) - 1)
-                    con.cursor().execute(
-                        "UPDATE requests SET time_from=?, time_to=? WHERE id=?",
-                        (TIME_SLOTS[start_fi], TIME_SLOTS[_actual_end], _req_id),
-                    )
-                    con.commit()
+                    con.table("requests").update({
+                        "time_from": TIME_SLOTS[start_fi],
+                        "time_to":   TIME_SLOTS[_actual_end],
+                    }).eq("id", _req_id).execute()
         else:
             # req_id 없는 단독 슬롯은 개별 이동
             for i, sched in enumerate(sel_list):
@@ -432,10 +422,10 @@ def page_schedule(con):
         # schedules에 requester_name 첨부 (본인 예약 식별용)
         _req_ids = [s["req_id"] for s in schedules if s.get("req_id")]
         if _req_ids:
-            _cur = con.cursor()
-            _ph  = ",".join("?" * len(_req_ids))
-            _cur.execute(f"SELECT id, requester_name FROM requests WHERE id IN ({_ph})", _req_ids)
-            _rmap = {r["id"]: (r["requester_name"] or "") for r in _cur.fetchall()}
+            _rows = (
+                con.table("requests").select("id,requester_name").in_("id", _req_ids).execute()
+            ).data or []
+            _rmap = {r["id"]: (r["requester_name"] or "") for r in _rows}
         else:
             _rmap = {}
         for s in schedules:
@@ -922,27 +912,29 @@ def page_schedule(con):
                     if _rid:
                         updated_req_ids.add(_rid)
                 # ① requests 테이블 업데이트
+                _req_payload = {
+                    "company_name":      company_name.strip(),
+                    "item_name":         item_name.strip(),
+                    "loading_method":    loading_method.strip(),
+                    "kind":              new_kind_val,
+                    "gate":              gate,
+                    "vehicle_ton":       final_ton,
+                    "vehicle_count":     int(vehicle_count or 1),
+                    "worker_supervisor": worker_supervisor.strip(),
+                    "worker_guide":      worker_guide.strip(),
+                    "worker_manager":    worker_manager.strip(),
+                    "notes":             notes.strip(),
+                    "updated_at":        now_str(),
+                }
                 for rid in updated_req_ids:
-                    _c = con.cursor()
-                    _c.execute(
-                        """UPDATE requests SET company_name=?, item_name=?, loading_method=?,
-                           kind=?, gate=?,
-                           vehicle_ton=?, vehicle_count=?,
-                           worker_supervisor=?, worker_guide=?, worker_manager=?,
-                           notes=?, updated_at=? WHERE id=?""",
-                        (company_name.strip(), item_name.strip(), loading_method.strip(),
-                         new_kind_val, gate,
-                         final_ton, int(vehicle_count or 1),
-                         worker_supervisor.strip(), worker_guide.strip(), worker_manager.strip(),
-                         notes.strip(), now_str(), rid),
-                    )
-                    con.commit()
+                    con.table("requests").update(_req_payload).eq("id", rid).execute()
                 # ② 동일 req_id의 모든 schedules 슬롯 일괄 업데이트
                 for rid in updated_req_ids:
-                    _c = con.cursor()
-                    _c.execute("SELECT id FROM schedules WHERE req_id=?", (rid,))
-                    for _row in _c.fetchall():
-                        schedule_update(con, _row[0],
+                    _sched_rows = (
+                        con.table("schedules").select("id").eq("req_id", rid).execute()
+                    ).data or []
+                    for _row in _sched_rows:
+                        schedule_update(con, _row["id"],
                                         company_name=company_name.strip(),
                                         kind=new_kind_val, gate=gate)
                 for k in _ADMIN_KEYS:
@@ -962,25 +954,31 @@ def page_schedule(con):
                 # 일반 사용자 — 본인 예약만 수정 (requester_name 조건)
                 rid = ref.get("req_id")
                 if rid:
-                    # ① requests 테이블 업데이트
-                    _c = con.cursor()
-                    _c.execute(
-                        """UPDATE requests SET company_name=?, item_name=?, loading_method=?,
-                           gate=?,
-                           vehicle_ton=?, vehicle_count=?,
-                           worker_supervisor=?, worker_guide=?, worker_manager=?,
-                           notes=?, updated_at=? WHERE id=? AND requester_name=?""",
-                        (company_name.strip(), item_name.strip(), loading_method.strip(),
-                         gate,
-                         final_ton, int(vehicle_count or 1),
-                         worker_supervisor.strip(), worker_guide.strip(), worker_manager.strip(),
-                         notes.strip(), now_str(), rid, user_name),
+                    # ① requests 테이블 업데이트 — requester_name 일치할 때만
+                    _existing = (
+                        con.table("requests").select("id").eq("id", rid)
+                        .eq("requester_name", user_name).limit(1).execute()
                     )
-                    con.commit()
+                    if _existing.data:
+                        con.table("requests").update({
+                            "company_name":      company_name.strip(),
+                            "item_name":         item_name.strip(),
+                            "loading_method":    loading_method.strip(),
+                            "gate":              gate,
+                            "vehicle_ton":       final_ton,
+                            "vehicle_count":     int(vehicle_count or 1),
+                            "worker_supervisor": worker_supervisor.strip(),
+                            "worker_guide":      worker_guide.strip(),
+                            "worker_manager":    worker_manager.strip(),
+                            "notes":             notes.strip(),
+                            "updated_at":        now_str(),
+                        }).eq("id", rid).eq("requester_name", user_name).execute()
                     # ② 동일 req_id의 모든 schedules 슬롯 일괄 업데이트
-                    _c.execute("SELECT id FROM schedules WHERE req_id=?", (rid,))
-                    for _row in _c.fetchall():
-                        schedule_update(con, _row[0], company_name=company_name.strip(), gate=gate)
+                    _sched_rows = (
+                        con.table("schedules").select("id").eq("req_id", rid).execute()
+                    ).data or []
+                    for _row in _sched_rows:
+                        schedule_update(con, _row["id"], company_name=company_name.strip(), gate=gate)
                 # 추가 슬롯 삽입 (일반 사용자)
                 add_kind_user = ref.get("kind", KIND_IN)
                 _add_key3     = "sched_sel_in_slots" if add_kind_user == KIND_IN else "sched_sel_out_slots"
@@ -1006,12 +1004,7 @@ def page_schedule(con):
                 _sdel(con, ref["id"])
                 rid = ref.get("req_id")
                 if rid:
-                    _c = con.cursor()
-                    _c.execute(
-                        "DELETE FROM requests WHERE id=? AND requester_name=?",
-                        (rid, user_name),
-                    )
-                    con.commit()
+                    con.table("requests").delete().eq("id", rid).eq("requester_name", user_name).execute()
                 for k in _USER_KEYS:
                     st.session_state.pop(k, None)
                 st.session_state.pop("sched_edit_from_home", None)

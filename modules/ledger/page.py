@@ -1,8 +1,7 @@
 """Ledger (대장) page."""
 
-import sqlite3
-
 import streamlit as st
+from supabase import Client
 
 from config import KIND_IN, REQ_STATUS
 from modules.request.crud import req_list, req_delete
@@ -17,7 +16,7 @@ _STATUS_BADGE = {
 }
 
 
-def page_ledger(con: sqlite3.Connection):
+def page_ledger(con: Client):
     st.markdown("""
     <style>
     [data-testid="stSelectbox"] [data-testid="stWidgetLabel"],

@@ -1,19 +1,30 @@
-"""Outputs / download page."""
+"""Outputs / download page (Supabase Storage-backed)."""
 
-import sqlite3
-from pathlib import Path
-
+import base64
 import streamlit as st
-
+from supabase import Client
 from datetime import date
-from shared.helpers import b64_download_link, req_display_id
+
+from shared.helpers import req_display_id
+from shared.storage import get_bytes_or_none, signed_url
 from config import KIND_IN
 from shared.share import make_share_text
 from modules.request.crud import req_list, req_get
 from modules.outputs.crud import outputs_get, generate_all_outputs
 
 
-def page_outputs(con: sqlite3.Connection):
+def _download_link(data: bytes, filename: str, label: str) -> str:
+    b64 = base64.b64encode(data).decode()
+    return (
+        f'<a download="{filename}" '
+        f'href="data:application/pdf;base64,{b64}" '
+        f'style="display:inline-block;padding:10px 16px;background:#1d4ed8;'
+        f'color:#fff;border-radius:6px;text-decoration:none;font-weight:600;">'
+        f'{label}</a>'
+    )
+
+
+def page_outputs(con: Client):
     st.markdown("""
     <style>
     [data-testid="stSelectbox"] [data-testid="stWidgetLabel"],
@@ -36,7 +47,7 @@ def page_outputs(con: sqlite3.Connection):
     </style>
     """, unsafe_allow_html=True)
     st.markdown("### 📦 계획서")
-    today = date.today().isoformat()
+
     allreq = [
         r for r in req_list(con, None, None, 500)
         if r.get('status') in ('APPROVED', 'EXECUTING', 'DONE')
@@ -57,16 +68,20 @@ def page_outputs(con: sqlite3.Connection):
         except Exception as e:
             st.error(f"생성 오류: {e}")
         st.rerun()
+
     outs = outputs_get(con, rid)
     if outs:
-        p = outs.get("plan_pdf_path", "")
-        if p and Path(p).exists():
+        plan_key = outs.get("plan_pdf_path", "")
+        pdf_bytes = get_bytes_or_none(con, plan_key) if plan_key else None
+        if pdf_bytes:
             doc_title = "자재반입계획서" if req.get("kind") == KIND_IN else "자재반출 사진대지"
-            st.markdown(b64_download_link(Path(p), f"⬇️ {doc_title} 다운로드"), unsafe_allow_html=True)
+            filename  = f"{req_display_id(req)}_plan.pdf"
+            st.markdown(_download_link(pdf_bytes, filename, f"⬇️ {doc_title} 다운로드"), unsafe_allow_html=True)
             with st.expander("🔍 미리보기"):
                 try:
-                    import fitz  # pymupdf
-                    doc = fitz.open(str(p))
+                    import fitz
+                    import io as _io
+                    doc = fitz.open(stream=_io.BytesIO(pdf_bytes), filetype="pdf")
                     for i in range(len(doc)):
                         page = doc.load_page(i)
                         pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
@@ -80,5 +95,6 @@ def page_outputs(con: sqlite3.Connection):
             st.info("산출물 재생성 버튼을 눌러주세요.")
     else:
         st.info("산출물 재생성 버튼을 눌러주세요.")
+
     st.markdown("#### SNS 공유 문구")
     st.text_area("", value=make_share_text(req, outs), height=200)

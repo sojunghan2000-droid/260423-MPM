@@ -1,6 +1,6 @@
-"""Login and project selection pages (account-based auth)."""
-import sqlite3
+"""Login and project selection pages (account-based auth, Supabase-backed)."""
 import streamlit as st
+from supabase import Client
 from config import ROLES
 from auth.session import auth_login, auth_reset, user_create, project_has_users
 from db.models import project_list, project_get, project_create, modules_for_project, module_toggle
@@ -24,7 +24,7 @@ def _login_header(project_name: str, subtitle: str) -> None:
 
 # ── 프로젝트 선택 ─────────────────────────────────────────────────────────
 
-def page_project_select(con: sqlite3.Connection):
+def page_project_select(con: Client):
     """Project selection screen — Step 1."""
     st.markdown("""
     <div style="text-align:center; padding:24px 0 16px 0;">
@@ -84,7 +84,7 @@ def page_project_select(con: sqlite3.Connection):
 
 # ── 로그인 폼 ─────────────────────────────────────────────────────────────
 
-def _page_login_form(con: sqlite3.Connection, project_id: str, project_name: str) -> None:
+def _page_login_form(con: Client, project_id: str, project_name: str) -> None:
     _login_header(project_name, "아이디와 비밀번호를 입력하세요")
     st.markdown("""
     <style>
@@ -156,7 +156,7 @@ def _page_login_form(con: sqlite3.Connection, project_id: str, project_name: str
 
 # ── 회원가입 폼 ───────────────────────────────────────────────────────────
 
-def _page_signup_form(con: sqlite3.Connection, project_id: str, project_name: str) -> None:
+def _page_signup_form(con: Client, project_id: str, project_name: str) -> None:
     _login_header(project_name, "계정을 만들어 서비스를 이용하세요")
     st.markdown("""
     <style>
@@ -252,7 +252,7 @@ def _page_signup_form(con: sqlite3.Connection, project_id: str, project_name: st
 
 # ── 메인 진입점 ───────────────────────────────────────────────────────────
 
-def page_login(con: sqlite3.Connection):
+def page_login(con: Client):
     """Authentication screen (account-based)."""
     project_id   = st.session_state.get("PROJECT_ID", "")
     project_name = st.session_state.get("PROJECT_NAME", "프로젝트")

@@ -15,18 +15,34 @@ try:
 except Exception:
     pass
 
+# 한글 폰트 등록 — 번들 우선, OS별 경로 fallback
 _FONT_NORMAL = "Helvetica"
 _FONT_BOLD   = "Helvetica-Bold"
 try:
     import os
-    _malgun     = "C:/Windows/Fonts/malgun.ttf"
-    _malgun_bd  = "C:/Windows/Fonts/malgunbd.ttf"
-    if os.path.exists(_malgun):
-        pdfmetrics.registerFont(TTFont("MalgunGothic", _malgun))
-        _FONT_NORMAL = "MalgunGothic"
-    if os.path.exists(_malgun_bd):
-        pdfmetrics.registerFont(TTFont("MalgunGothic-Bold", _malgun_bd))
-        _FONT_BOLD = "MalgunGothic-Bold"
+    _BUNDLE_DIR = os.path.join(os.path.dirname(__file__), "fonts")
+    _candidates_normal = [
+        os.path.join(_BUNDLE_DIR, "NanumGothic.ttf"),
+        "C:/Windows/Fonts/malgun.ttf",
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "/usr/share/fonts/nanum/NanumGothic.ttf",
+    ]
+    _candidates_bold = [
+        os.path.join(_BUNDLE_DIR, "NanumGothicBold.ttf"),
+        "C:/Windows/Fonts/malgunbd.ttf",
+        "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+        "/usr/share/fonts/nanum/NanumGothicBold.ttf",
+    ]
+    for _p in _candidates_normal:
+        if os.path.exists(_p):
+            pdfmetrics.registerFont(TTFont("KoreanFont", _p))
+            _FONT_NORMAL = "KoreanFont"
+            break
+    for _p in _candidates_bold:
+        if os.path.exists(_p):
+            pdfmetrics.registerFont(TTFont("KoreanFont-Bold", _p))
+            _FONT_BOLD = "KoreanFont-Bold"
+            break
 except Exception:
     pass
 

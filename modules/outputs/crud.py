@@ -26,6 +26,8 @@ from modules.outputs.pdf import (
     pdf_permit,
     pdf_check_card,
     pdf_exec_summary,
+    _FONT_NORMAL,
+    _FONT_BOLD,
 )
 
 
@@ -135,9 +137,9 @@ def generate_all_outputs(con: Client, rid: str) -> Dict[str, str]:
     bundle_local = out["bundle"] / f"{disp}_bundle.pdf"
     c = canvas.Canvas(str(bundle_local), pagesize=A4)
     pdf_simple_header(c, "산출물 번들 안내", f"요청ID: {rid} · 생성: {now_str()} · {APP_VERSION}")
-    c.setFont("Helvetica", 11)
+    c.setFont(_FONT_NORMAL, 11)
     c.drawString(20 * mm, 260 * mm, "아래 파일들이 함께 생성되었습니다.")
-    c.setFont("Helvetica", 10)
+    c.setFont(_FONT_NORMAL, 10)
     y = 248 * mm
     for name in (f"{disp}_plan.pdf", f"{disp}_permit.pdf",
                  f"{disp}_checkcard.pdf" if check_local else None,

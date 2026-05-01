@@ -1,13 +1,14 @@
-"""Signature and stamp capture UI components (Supabase Storage-backed)."""
+"""Signature and stamp capture UI components."""
 
+import uuid
 from pathlib import Path
 from typing import Optional, Tuple
 
 import streamlit as st
-from supabase import Client
 
+from db.connection import get_supabase, path_output
 from shared.helpers import bytes_from_camera_or_upload, png_bytes_from_canvas_rgba
-from shared.storage import upload_bytes, sign_key, stamp_key
+from shared.storage import upload_output
 
 CANVAS_AVAILABLE = True
 try:
@@ -16,19 +17,26 @@ except Exception:
     CANVAS_AVAILABLE = False
 
 
-def save_bytes_to_storage(con: Client, folder_key: str, data: bytes, suffix: str) -> str:
-    """Upload raw bytes to Supabase Storage and return the object key."""
-    project_id = st.session_state.get("PROJECT_ID", "")
-    if folder_key == "stamp":
-        key = stamp_key(project_id, suffix)
-        ct = "image/png" if suffix.lower() == ".png" else "image/jpeg"
-    else:
-        key = sign_key(project_id, suffix)
-        ct = "image/png" if suffix.lower() == ".png" else "image/jpeg"
-    return upload_bytes(con, key, data, ct)
+def save_bytes_to_file(folder_key: str, rid: str, tag: str, data: bytes, suffix: str) -> str:
+    """Persist raw bytes for a request artifact.
+
+    Writes a local copy under MaterialToolShared/<folder_key>/ for in-session display
+    and uploads the same bytes to the Supabase outputs bucket. Returns the Supabase
+    Storage object key (e.g. ``sign/<rid>_xxx.png``) so it can be stored on a row
+    and later resolved via :func:`shared.storage.cache_to_local`.
+    """
+    out = path_output()[folder_key]
+    fname = f"{rid}_{tag}_{uuid.uuid4().hex[:8]}{suffix}"
+    fp = out / fname
+    fp.write_bytes(data)
+    try:
+        sb = get_supabase()
+        return upload_output(sb, folder_key, rid, suffix, data, unique=True) or str(fp)
+    except Exception:
+        return str(fp)
 
 
-def ui_signature_block(con: Client, rid: str, label: str, key_prefix: str) -> Tuple[Optional[str], Optional[str]]:
+def ui_signature_block(rid: str, label: str, key_prefix: str) -> Tuple[Optional[str], Optional[str]]:
     """Render signature + stamp upload block. Returns (sign_path, stamp_path)."""
     st.markdown(f"#### {label}")
     st.markdown("""
@@ -94,36 +102,37 @@ def ui_signature_block(con: Client, rid: str, label: str, key_prefix: str) -> Tu
         border-color: #4b5563 !important;
     }
     [class*="_save"] button {
-        min-height: 28px !important;
-        height: 28px !important;
+        min-height: 44px !important;
+        height: 44px !important;
+        min-height: 44px !important;
         padding: 0 !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
-        background-color: #1d4ed8 !important;
-        border-color: #1d4ed8 !important;
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+        border-color: #2563eb !important;
         color: #ffffff !important;
     }
     [class*="_save"] button p {
-        line-height: 28px !important;
+        line-height: 1 !important;
         margin: 0 !important;
         padding: 0 !important;
         color: #ffffff !important;
     }
     [class*="_save"] button:hover {
-        background-color: #1e40af !important;
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
         border-color: #1e40af !important;
     }
     [class*="_clear"] button {
-        min-height: 28px !important;
-        height: 28px !important;
+        min-height: 44px !important;
+        height: 44px !important;
         padding: 0 !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
     }
     [class*="_clear"] button p {
-        line-height: 28px !important;
+        line-height: 1 !important;
         margin: 0 !important;
         padding: 0 !important;
     }
@@ -191,6 +200,7 @@ def ui_signature_block(con: Client, rid: str, label: str, key_prefix: str) -> Tu
                     drawing_mode="freedraw",
                     key=f"{key_prefix}_canvas",
                 )
+            st.markdown("<div style='margin-top:16px'></div>", unsafe_allow_html=True)
             with st.container(key=f"{key_prefix}_btn_row"):
                 colA, colB = st.columns(2, gap="small")
             with colA:
@@ -202,7 +212,7 @@ def ui_signature_block(con: Client, rid: str, label: str, key_prefix: str) -> Tu
                         if not png:
                             st.session_state[f"{key_prefix}_save_msg"] = ("error", "서명 저장 실패")
                         else:
-                            sign_path = save_bytes_to_storage(con, "sign", png, ".png")
+                            sign_path = save_bytes_to_file("sign", rid, "sign_draw", png, ".png")
                             st.session_state[f"{key_prefix}_sign_path"] = sign_path
                             st.session_state[f"{key_prefix}_save_msg"] = ("success", "서명 저장 완료")
             with colB:
@@ -242,7 +252,7 @@ def ui_signature_block(con: Client, rid: str, label: str, key_prefix: str) -> Tu
                 data = bytes_from_camera_or_upload(upl)
                 if data:
                     suffix = Path(upl.name).suffix.lower() or ".png"
-                    sign_path = save_bytes_to_storage(con, "sign", data, suffix)
+                    sign_path = save_bytes_to_file("sign", rid, "sign_upl", data, suffix)
                     st.session_state[f"{key_prefix}_sign_path"] = sign_path
                     st.session_state[f"{key_prefix}_sign_preview"] = {"data": data, "name": upl.name}
                     st.session_state[f"{key_prefix}_sign_editing"] = False

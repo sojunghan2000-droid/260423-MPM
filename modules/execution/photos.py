@@ -1,17 +1,18 @@
-"""Photo capture UI components for execution page (Supabase Storage-backed)."""
+"""Photo capture UI components for execution page."""
 
-from supabase import Client
+from pathlib import Path
 
 import streamlit as st
+from supabase import Client
 
 from shared.helpers import bytes_from_camera_or_upload
-from shared.storage import delete_key as storage_delete_key
-from modules.execution.crud import photo_add, photos_for_req
+from modules.execution.crud import photo_add, photos_for_req, photo_delete_slot
 
 MAX_PHOTOS = 4
 
 _PHOTO_CSS = """
 <style>
+/* 사진 그리드 높이 통일 */
 [class*="st-key-photo_del_btn_"] ~ div [data-testid="stImage"] img,
 [data-testid="stImage"] img {
     object-fit: cover !important;
@@ -50,22 +51,29 @@ _PHOTO_CSS = """
 
 
 def ui_photo_upload(con: Client, rid: str):
+    """사진 최대 4장 등록 (촬영 또는 파일 업로드)."""
     st.markdown(_PHOTO_CSS, unsafe_allow_html=True)
 
     existing = photos_for_req(con, rid)
     count = len(existing)
 
+    # ── 등록된 사진 목록 ──────────────────────────────────────────────────
     if existing:
         st.markdown(f"**등록된 사진 ({count}/{MAX_PHOTOS})**")
 
+        # 2열 그리드 — 사진 + 파일명 + 삭제 버튼을 셀 단위로 묶어서 렌더링
         for row_start in range(0, len(existing), 2):
             row_photos = existing[row_start:row_start + 2]
             cols = st.columns(2)
             for col, p in zip(cols, row_photos):
                 with col:
-                    url = p.get("display_url") or ""
-                    if url:
-                        st.image(url, use_container_width=True)
+                    src = p.get("storage_url") or ""
+                    if not src:
+                        legacy = p.get("file_path") or ""
+                        if legacy and Path(legacy).exists():
+                            src = str(legacy)
+                    if src:
+                        st.image(src, use_container_width=True)
                     else:
                         st.markdown(
                             '<div style="height:160px;background:#f1f5f9;border-radius:6px;'
@@ -81,13 +89,12 @@ def ui_photo_upload(con: Client, rid: str):
                     )
                     with st.container(key=f"photo_del_btn_{p['id'][:8]}"):
                         if st.button("삭제", key=f"photo_del_{p['id'][:8]}", use_container_width=False):
-                            key = p.get("storage_url") or p.get("file_path") or ""
-                            storage_delete_key(con, key)
-                            con.table("photos").delete().eq("id", p["id"]).execute()
+                            photo_delete_slot(con, rid, p.get("slot_key", ""))
                             st.rerun()
 
         st.markdown("<div style='margin-bottom:8px'></div>", unsafe_allow_html=True)
 
+    # ── 추가 업로드 (4장 미만일 때만) ────────────────────────────────────
     if count < MAX_PHOTOS:
         remaining = MAX_PHOTOS - count
         st.markdown(f"**사진 추가** (현재 {count}장 · 최대 {remaining}장 더 추가 가능)")
@@ -120,6 +127,7 @@ def ui_photo_upload(con: Client, rid: str):
         st.info(f"사진 {MAX_PHOTOS}장이 모두 등록되었습니다. 삭제 후 다시 추가할 수 있습니다.")
 
 
+# 하위 호환성 유지
 def ui_photo_capture_required(con: Client, rid: str):
     ui_photo_upload(con, rid)
 

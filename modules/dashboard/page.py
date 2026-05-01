@@ -177,8 +177,10 @@ _DASH_CSS = """
 """
 
 
-def _build_excel(reqs: list, site_name: str, date_label: str) -> bytes:
+def _build_excel(reqs: list, site_name: str, date_label: str, terminal_zones: set = None) -> bytes:
     """요청 목록을 엑셀 파일로 변환하여 bytes 반환."""
+    if terminal_zones is None:
+        terminal_zones = set()
     from openpyxl import Workbook
     from openpyxl.styles import (
         Font, PatternFill, Alignment, Border, Side, GradientFill
@@ -227,40 +229,17 @@ def _build_excel(reqs: list, site_name: str, date_label: str) -> bytes:
     ws["G2"].alignment = Alignment(horizontal="right", vertical="center")
     ws.row_dimensions[2].height = 18
 
-    # ── 행 3~4: 헤더 (2단) ────────────────────────────────────────────────
-    headers_top = [
-        ("A", "No"), ("B", "업체명"), ("C", "자재종류"), ("D", "수량"),
-        ("E", "반입·반출 차량"), ("F", "상·하차 방식"),
-        (None, "장 소"),   # G~H merge
-        ("I", "시간"), ("J", "작업지휘자"), ("K", "유도원"), ("L", "담당자"),
-    ]
-    # 장소 헤더 — G3:H3 merge
-    ws.merge_cells("G3:H3")
-    ws["G3"].value = "장 소"
-    ws["G3"].font  = hdr_font
-    ws["G3"].fill  = hdr_fill
-    ws["G3"].alignment = center
-    ws["G3"].border = border_all
-
+    # ── 행 3: 헤더 (단일행) ───────────────────────────────────────────────
     for col_letter, label in [
-        ("A","No"),("B","업체명"),("C","자재종류"),("D","수량"),
-        ("E","반입·반출 차량"),("F","상·하차 방식"),
-        ("I","시간"),("J","작업지휘자"),("K","유도원"),("L","담당자"),
+        ("A","No"), ("B","Zone"), ("C","터미널"), ("D","업체명"), ("E","자재종류"),
+        ("F","수량"), ("G","반입·반출 차량"), ("H","상·하차 방식"),
+        ("I","시간"), ("J","작업지휘자"), ("K","유도원"), ("L","담당자"),
     ]:
         ws.merge_cells(f"{col_letter}3:{col_letter}4")
         cell = ws[f"{col_letter}3"]
         cell.value = label
         cell.font  = hdr_font
         cell.fill  = hdr_fill
-        cell.alignment = center
-        cell.border = border_all
-
-    # 하위 헤더 — Zone / 장소
-    for col_letter, label in [("G","Zone"), ("H","장소")]:
-        cell = ws[f"{col_letter}4"]
-        cell.value = label
-        cell.font  = Font(name="맑은 고딕", bold=True, color="FFFFFF", size=9)
-        cell.fill  = sub_fill
         cell.alignment = center
         cell.border = border_all
 
@@ -292,9 +271,13 @@ def _build_excel(reqs: list, site_name: str, date_label: str) -> bytes:
         vcnt_int = int(vcnt_raw) if str(vcnt_raw).isdigit() else 0
         total_cnt += vcnt_int
 
+        zone_xl     = r.get("booking_zone", "")
+        gate_xl_raw = r.get("gate", "")
+        gate_xl_raw = "" if gate_xl_raw == "선택" else gate_xl_raw
+        gate_xl     = gate_xl_raw if zone_xl in terminal_zones else "N/A"
         fill = even_fill if i % 2 == 0 else PatternFill("solid", fgColor="FFFFFF")
-        values = [i, company, item, vcnt, f"{kind_lbl} / {vton}", loading,
-                  gate_zone, gate_place, t_from, sup, guide, mgr]
+        values = [i, zone_xl, gate_xl, company, item, vcnt, f"{kind_lbl} / {vton}", loading,
+                  t_from, sup, guide, mgr]
         for col_idx, val in enumerate(values, 1):
             cell = ws.cell(row=row_num, column=col_idx, value=val)
             cell.font   = body_font
@@ -305,18 +288,18 @@ def _build_excel(reqs: list, site_name: str, date_label: str) -> bytes:
 
     # ── 합계 행 ───────────────────────────────────────────────────────────
     total_row = len(reqs) + 5
-    ws.merge_cells(f"A{total_row}:C{total_row}")
+    ws.merge_cells(f"A{total_row}:D{total_row}")
     ws[f"A{total_row}"].value = "합 계"
     ws[f"A{total_row}"].font  = total_font
     ws[f"A{total_row}"].fill  = total_fill
     ws[f"A{total_row}"].alignment = Alignment(horizontal="right", vertical="center")
     ws[f"A{total_row}"].border = border_all
-    ws[f"D{total_row}"].value = f"{total_cnt}대"
-    ws[f"D{total_row}"].font  = total_font
-    ws[f"D{total_row}"].fill  = total_fill
-    ws[f"D{total_row}"].alignment = center
-    ws[f"D{total_row}"].border = border_all
-    for col_idx in range(5, 13):
+    ws[f"E{total_row}"].value = f"{total_cnt}대"
+    ws[f"E{total_row}"].font  = total_font
+    ws[f"E{total_row}"].fill  = total_fill
+    ws[f"E{total_row}"].alignment = center
+    ws[f"E{total_row}"].border = border_all
+    for col_idx in range(6, 13):
         cell = ws.cell(row=total_row, column=col_idx)
         cell.fill   = total_fill
         cell.border = border_all
@@ -324,7 +307,7 @@ def _build_excel(reqs: list, site_name: str, date_label: str) -> bytes:
 
     # ── 열 너비 ───────────────────────────────────────────────────────────
     from openpyxl.utils import get_column_letter
-    col_widths = [5, 14, 14, 7, 14, 12, 10, 14, 8, 12, 10, 10]
+    col_widths = [5, 8, 14, 14, 7, 14, 12, 10, 8, 12, 10, 10]
     for col_idx, w in enumerate(col_widths, 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = w
 
@@ -336,16 +319,11 @@ def _build_excel(reqs: list, site_name: str, date_label: str) -> bytes:
 
 
 def _req_list_for_date(con: Client, project_id: str, target_date: str):
-    r = (
-        con.table("requests")
-        .select("*")
-        .eq("project_id", project_id)
-        .eq("date", target_date)
-        .order("time_from")
-        .order("created_at")
-        .execute()
-    )
-    return r.data or []
+    res = (con.table("requests").select("*")
+           .eq("project_id", project_id).eq("date", target_date)
+           .order("booking_zone").order("time_from").order("created_at")
+           .execute())
+    return res.data or []
 
 
 def page_dashboard(con: Client):
@@ -395,6 +373,13 @@ def page_dashboard(con: Client):
                4:"금요일", 5:"토요일", 6:"일요일"}
     date_label = f"{cur_date.year}년 {cur_date.month}월 {cur_date.day}일 {dow_map[cur_date.weekday()]}"
 
+    # ── 터미널 사용 존 목록 로드 ─────────────────────────────────────────
+    import json as _json
+    try:
+        _terminal_zones = set(_json.loads(settings_get(con, "terminal_zones_json", '[]')))
+    except Exception:
+        _terminal_zones = set()
+
     # ── 테이블 행 생성 ────────────────────────────────────────────────────
     row_parts = []
     total_cnt = 0
@@ -407,16 +392,17 @@ def page_dashboard(con: Client):
             is_in    = kind == KIND_IN
             kind_cls = "kind-in" if is_in else "kind-out"
             kind_lbl = "반입" if is_in else "반출"
+            zone     = r.get("booking_zone", "")
             company  = r.get("company_name", "")
             item     = r.get("item_name", "")
             vcnt_raw = r.get("vehicle_count", "")
             vcnt     = f"{vcnt_raw}대" if vcnt_raw else ""
             vton     = r.get("vehicle_ton", "")
             loading  = r.get("loading_method", "")
-            gate_raw   = r.get("gate", "")
-            gate_parts = gate_raw.split("|", 1) if "|" in gate_raw else [gate_raw, ""]
-            gate_zone  = gate_parts[0].strip()
-            gate_place = gate_parts[1].strip() if len(gate_parts) > 1 else ""
+            gate_raw = r.get("gate", "")
+            gate_raw = "" if gate_raw == "선택" else gate_raw
+            # 터미널 미사용 존이면 N/A 표기
+            gate     = gate_raw if zone in _terminal_zones else "N/A"
             t_from = r.get("time_from", "")
             sup    = r.get("worker_supervisor", "")
             guide  = r.get("worker_guide", "")
@@ -426,13 +412,13 @@ def page_dashboard(con: Client):
 
             tds = (
                 f'<td>{i}</td>'
+                f'<td>{zone}</td>'
+                f'<td>{gate}</td>'
                 f'<td>{company}</td>'
                 f'<td>{item}</td>'
                 f'<td>{vcnt}</td>'
                 f'<td><span class="{kind_cls}">{kind_lbl}</span> / {vton}</td>'
                 f'<td>{loading}</td>'
-                f'<td>{gate_zone}</td>'
-                f'<td>{gate_place}</td>'
                 f'<td>{t_from}</td>'
                 f'<td>{sup}</td>'
                 f'<td>{guide}</td>'
@@ -443,9 +429,9 @@ def page_dashboard(con: Client):
         # 합계 행
         row_parts.append(
             f'<tr class="total-row">'
-            f'<td colspan="3" style="text-align:right;padding-right:8px;">합 계</td>'
+            f'<td colspan="4" style="text-align:right;padding-right:8px;">합 계</td>'
             f'<td>{total_cnt}대</td>'
-            f'<td colspan="8"></td>'
+            f'<td colspan="7"></td>'
             f'</tr>'
         )
 
@@ -455,21 +441,18 @@ def page_dashboard(con: Client):
     thead = (
         '<thead>'
         '<tr>'
-        '<th rowspan="2">No</th>'
-        '<th rowspan="2">업체명</th>'
-        '<th rowspan="2">자재종류</th>'
-        '<th rowspan="2">수량</th>'
-        '<th rowspan="2">반입·반출<br>차량</th>'
-        '<th rowspan="2">상·하차<br>방식</th>'
-        '<th colspan="2">장 소</th>'
-        '<th rowspan="2">시간</th>'
-        '<th rowspan="2">작업<br>지휘자</th>'
-        '<th rowspan="2">유도원</th>'
-        '<th rowspan="2">담당자</th>'
-        '</tr>'
-        '<tr>'
-        '<th class="th-sub">Zone</th>'
-        '<th class="th-sub">장소</th>'
+        '<th>No</th>'
+        '<th>Zone</th>'
+        '<th>터미널</th>'
+        '<th>업체명</th>'
+        '<th>자재종류</th>'
+        '<th>수량</th>'
+        '<th>반입·반출<br>차량</th>'
+        '<th>상·하차<br>방식</th>'
+        '<th>시간</th>'
+        '<th>작업<br>지휘자</th>'
+        '<th>유도원</th>'
+        '<th>담당자</th>'
         '</tr>'
         '</thead>'
     )
@@ -498,7 +481,7 @@ def page_dashboard(con: Client):
     st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
     if reqs:
         try:
-            excel_bytes = _build_excel(reqs, site_name, date_label)
+            excel_bytes = _build_excel(reqs, site_name, date_label, _terminal_zones)
             filename = f"반입반출현황_{target_str}.xlsx"
             _, btn_col, _ = st.columns([1.5, 2, 1.5])
             with btn_col:

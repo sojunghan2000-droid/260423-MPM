@@ -11,7 +11,7 @@ from modules.execution.photos import ui_photo_upload
 from modules.outputs.crud import generate_all_outputs
 
 
-def _do_confirm(con: Client, rid: str, reedit_key: str):
+def _do_confirm(con, rid: str, reedit_key: str):
     """Execute confirmation."""
     try:
         req_update_status(con, rid, "EXECUTING")

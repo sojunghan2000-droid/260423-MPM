@@ -1,11 +1,14 @@
 """Ledger (대장) page."""
 
+import json
+
 import streamlit as st
 from supabase import Client
 
 from config import KIND_IN, REQ_STATUS
 from modules.request.crud import req_list, req_delete
 from shared.helpers import req_display_id
+from db.models import settings_get
 
 _STATUS_BADGE = {
     "PENDING_APPROVAL": "⏳ 승인대기",
@@ -74,17 +77,31 @@ def page_ledger(con: Client):
     role      = st.session_state.get("USER_ROLE", "")
     user_name = st.session_state.get("USER_NAME", "")
 
+    # 예약존 목록 로드
+    try:
+        _bz_all = json.loads(settings_get(con, "booking_zones_json", '["A"]'))
+        _bz_dis = json.loads(settings_get(con, "booking_zones_disabled_json", "[]"))
+        _bz_opts = [z for z in _bz_all if z not in _bz_dis]
+    except Exception:
+        _bz_opts = []
+
     f1, f2 = st.columns(2)
     with f1:
         kind = st.selectbox("구분", ["ALL", "IN", "OUT"])
     with f2:
         status = st.selectbox("상태", ["ALL"] + REQ_STATUS)
-    q = st.text_input("검색").strip().lower()
+    fc1, fc2 = st.columns(2)
+    with fc1:
+        zone_filter = st.selectbox("예약존", ["ALL"] + _bz_opts) if _bz_opts else "ALL"
+    with fc2:
+        q = st.text_input("검색").strip().lower()
     filtered = []
     for r in rows:
         if kind != "ALL" and r['kind'] != kind:
             continue
         if status != "ALL" and r['status'] != status:
+            continue
+        if zone_filter != "ALL" and r.get('booking_zone', 'A') != zone_filter:
             continue
         disp_id = req_display_id(r)
         if q and q not in f"{disp_id} {r.get('company_name','')} {r.get('item_name','')}".lower():
@@ -100,7 +117,8 @@ def page_ledger(con: Client):
         company  = r.get('company_name') or '-'
         item     = r.get('item_name') or '-'
         date     = (r.get('date') or r.get('created_at') or '')[:10]
-        line     = f"**{disp_id}** · **[{kind_txt}]** {company} · {item} · {date} | {badge}"
+        zone     = r.get('booking_zone') or 'A'
+        line     = f"**{disp_id}** · **[{kind_txt}]** [{zone}] {company} · {item} · {date} | {badge}"
 
         can_delete = is_admin
 

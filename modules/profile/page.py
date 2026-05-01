@@ -1,6 +1,7 @@
-"""내 정보 수정 페이지 (Supabase-backed)."""
+"""내 정보 수정 페이지."""
 import streamlit as st
 from supabase import Client
+
 from shared.helpers import now_str
 from auth.session import _hash_pw, _new_salt
 from config import ROLES
@@ -27,26 +28,15 @@ def page_profile(con: Client):
     username   = st.session_state.get("USER_ID", "")
     user_name  = st.session_state.get("USER_NAME", "")
 
-    r = (
-        con.table("profiles")
-        .select("*")
-        .eq("project_id", project_id)
-        .eq("username", username)
-        .limit(1)
-        .execute()
-    )
-    user = r.data[0] if r.data else None
-    if not user:
-        r2 = (
-            con.table("profiles")
-            .select("*")
-            .eq("project_id", project_id)
-            .eq("name", user_name)
-            .limit(1)
-            .execute()
-        )
-        user = r2.data[0] if r2.data else None
-
+    # username으로 먼저 조회, 없으면 name으로 조회
+    res = (con.table("profiles").select("*")
+           .eq("project_id", project_id).eq("username", username)
+           .limit(1).execute())
+    if not res.data:
+        res = (con.table("profiles").select("*")
+               .eq("project_id", project_id).eq("name", user_name)
+               .limit(1).execute())
+    user = res.data[0] if res.data else {}
     if not user:
         st.error("계정 정보를 불러올 수 없습니다.")
         return
@@ -71,14 +61,9 @@ def page_profile(con: Client):
                 st.error(f"필수 항목을 입력하세요: {', '.join(errors)}")
                 return
 
-            payload = {
-                "name":         new_name.strip(),
-                "company_name": new_company.strip(),
-                "role":         new_role,
-                "updated_at":   now_str(),
-            }
+            # 비밀번호 변경 요청 시 검증
             if cur_pw or new_pw1 or new_pw2:
-                if not user.get("salt") or _hash_pw(cur_pw, user["salt"]) != user.get("password_hash"):
+                if _hash_pw(cur_pw, user["salt"]) != user["password_hash"]:
                     st.error("현재 비밀번호가 올바르지 않습니다.")
                     return
                 if not new_pw1:
@@ -91,11 +76,24 @@ def page_profile(con: Client):
                     st.error("새 비밀번호가 일치하지 않습니다.")
                     return
                 new_salt = _new_salt()
-                payload["salt"] = new_salt
-                payload["password_hash"] = _hash_pw(new_pw1, new_salt)
+                new_hash = _hash_pw(new_pw1, new_salt)
+                con.table("profiles").update({
+                    "name": new_name.strip(),
+                    "company_name": new_company.strip(),
+                    "role": new_role,
+                    "password_hash": new_hash,
+                    "salt": new_salt,
+                    "updated_at": now_str(),
+                }).eq("id", user["id"]).execute()
+            else:
+                con.table("profiles").update({
+                    "name": new_name.strip(),
+                    "company_name": new_company.strip(),
+                    "role": new_role,
+                    "updated_at": now_str(),
+                }).eq("id", user["id"]).execute()
 
-            con.table("profiles").update(payload).eq("id", user["id"]).execute()
-
+            # 세션 업데이트
             st.session_state["USER_NAME"]    = new_name.strip()
             st.session_state["USER_COMPANY"] = new_company.strip()
             st.session_state["USER_ROLE"]    = new_role

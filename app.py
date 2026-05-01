@@ -17,7 +17,6 @@ st.set_page_config(
 
 # ── Imports ──
 from db.connection import con_open
-from db.migrations import db_init_and_migrate
 from core.css import inject_css
 from core.header import ui_header
 from core.nav import render_topnav
@@ -183,9 +182,13 @@ def page_home(con):
             "REJECTED":         "❌",
         }.get(status, "📋")
         title = f"{kind} · {r.get('company_name','')} · {r.get('item_name','')}"
-        sub = f"{r.get('date','')} {r.get('time_from','')}~{r.get('time_to','')} GATE:{r.get('gate','')} | {r.get('driver_name','')}"
+        sub = f"{r.get('date','')} {r.get('time_from','')}~{r.get('time_to','')} | {r.get('driver_name','')}"
         target_page = PAGE_FOR_STATUS.get(status, "승인")
-        label = f"{status_icon} {title} · {r.get('date','')} {r.get('time_from','')}~{r.get('time_to','')} · GATE:{r.get('gate','')} · {r.get('driver_name','')} | {slabel}"
+        _zone = r.get('booking_zone') or ''
+        _gate = r.get('gate') or ''
+        _gate_txt = f" · {_gate}" if _gate and _gate != '선택' else ''
+        _zone_txt = f"[{_zone}] " if _zone else ''
+        label = f"{status_icon} {_zone_txt}{title} · {r.get('date','')} {r.get('time_from','')}~{r.get('time_to','')}{_gate_txt} | {slabel}"
 
         can_delete = is_admin or (
             role == "협력사" and r.get("requester_name") == user_name
@@ -241,9 +244,8 @@ def page_home(con):
 
 def main():
     """Main application entry point."""
-    # ── DB init ──
+    # ── DB init (Supabase: schema is managed via Supabase CLI / SQL migrations) ──
     con = con_open()
-    db_init_and_migrate(con)
 
     # ── CSS ──
     inject_css()

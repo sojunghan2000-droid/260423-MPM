@@ -19,6 +19,7 @@ def dnd_timeline(
     username: str = "",
     user_sel_ids: Optional[List[str]] = None,
     in_edit_mode: bool = False,
+    add_time_mode: bool = False,
     key: str = None,
 ) -> Optional[Dict[str, Any]]:
     """Render a drag-and-drop timeline grid.
@@ -43,6 +44,7 @@ def dnd_timeline(
         username=username,
         user_sel_ids=list(user_sel_ids or []),
         in_edit_mode=in_edit_mode,
+        add_time_mode=add_time_mode,
         key=key,
         default=None,
     )

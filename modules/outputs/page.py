@@ -1,27 +1,28 @@
-"""Outputs / download page (Supabase Storage-backed)."""
+"""Outputs / download page."""
 
-import base64
+from pathlib import Path
+
 import streamlit as st
 from supabase import Client
-from datetime import date
 
-from shared.helpers import req_display_id
-from shared.storage import get_bytes_or_none, signed_url
+from datetime import date
+from shared.helpers import b64_download_link, req_display_id
+from shared.storage import cache_to_local
+from db.connection import outputs_bucket
 from config import KIND_IN
 from shared.share import make_share_text
 from modules.request.crud import req_list, req_get
 from modules.outputs.crud import outputs_get, generate_all_outputs
 
 
-def _download_link(data: bytes, filename: str, label: str) -> str:
-    b64 = base64.b64encode(data).decode()
-    return (
-        f'<a download="{filename}" '
-        f'href="data:application/pdf;base64,{b64}" '
-        f'style="display:inline-block;padding:10px 16px;background:#1d4ed8;'
-        f'color:#fff;border-radius:6px;text-decoration:none;font-weight:600;">'
-        f'{label}</a>'
-    )
+def _resolve_local(con: Client, value: str) -> Path | None:
+    """Resolve a stored output path (local or Storage object key) to a local file."""
+    if not value:
+        return None
+    p = Path(value)
+    if p.exists() and p.stat().st_size > 0:
+        return p
+    return cache_to_local(con, outputs_bucket(), value)
 
 
 def page_outputs(con: Client):
@@ -47,7 +48,7 @@ def page_outputs(con: Client):
     </style>
     """, unsafe_allow_html=True)
     st.markdown("### 📦 계획서")
-
+    today = date.today().isoformat()
     allreq = [
         r for r in req_list(con, None, None, 500)
         if r.get('status') in ('APPROVED', 'EXECUTING', 'DONE')
@@ -68,20 +69,16 @@ def page_outputs(con: Client):
         except Exception as e:
             st.error(f"생성 오류: {e}")
         st.rerun()
-
     outs = outputs_get(con, rid)
     if outs:
-        plan_key = outs.get("plan_pdf_path", "")
-        pdf_bytes = get_bytes_or_none(con, plan_key) if plan_key else None
-        if pdf_bytes:
+        local = _resolve_local(con, outs.get("plan_pdf_path", ""))
+        if local:
             doc_title = "자재반입계획서" if req.get("kind") == KIND_IN else "자재반출 사진대지"
-            filename  = f"{req_display_id(req)}_plan.pdf"
-            st.markdown(_download_link(pdf_bytes, filename, f"⬇️ {doc_title} 다운로드"), unsafe_allow_html=True)
+            st.markdown(b64_download_link(local, f"⬇️ {doc_title} 다운로드"), unsafe_allow_html=True)
             with st.expander("🔍 미리보기"):
                 try:
-                    import fitz
-                    import io as _io
-                    doc = fitz.open(stream=_io.BytesIO(pdf_bytes), filetype="pdf")
+                    import fitz  # pymupdf
+                    doc = fitz.open(str(local))
                     for i in range(len(doc)):
                         page = doc.load_page(i)
                         pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
@@ -95,6 +92,17 @@ def page_outputs(con: Client):
             st.info("산출물 재생성 버튼을 눌러주세요.")
     else:
         st.info("산출물 재생성 버튼을 눌러주세요.")
-
     st.markdown("#### SNS 공유 문구")
-    st.text_area("", value=make_share_text(req, outs), height=200)
+    share_text = make_share_text(req, outs)
+    st.text_area("", value=share_text, height=200)
+    escaped = share_text.replace("`", "\\`").replace("\\", "\\\\")
+    st.components.v1.html(f"""
+        <button onclick="navigator.clipboard.writeText(`{escaped}`).then(()=>{{
+            this.innerText='✅ 복사됨!';
+            setTimeout(()=>this.innerText='📋 클립보드에 복사',1500);
+        }})" style="
+            width:100%; padding:12px; font-size:15px; font-weight:600;
+            background:#FEE500; color:#3C1E1E; border:none; border-radius:8px;
+            cursor:pointer; min-height:44px; margin-top:4px;
+        ">📋 클립보드에 복사</button>
+    """, height=60)

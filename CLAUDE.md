@@ -24,30 +24,51 @@ python -m py_compile app.py
 ```
 app.py              # 진입점 + 페이지 라우터
 config.py           # 전역 상수 (ROLES, STATUS, KIND 등)
-requirements.txt    # 의존성
+requirements.txt    # 의존성 (supabase>=2.0.0 포함)
+.streamlit/
+  secrets.toml      # SUPABASE_URL/KEY (gitignored, 절대 커밋 금지)
+  secrets.toml.example  # Cloud 배포 시 참고 템플릿
 
-auth/               # 프로젝트 선택 + 로그인
+auth/               # 프로젝트 선택 + 하이브리드 로그인 (PBKDF2 / Supabase Auth)
 core/               # CSS, 헤더, 네비게이션, 사이드바
-db/                 # SQLite 연결, 마이그레이션, 프로젝트/모듈 CRUD
+db/
+  connection.py     # get_supabase() — @st.cache_resource Client 싱글턴, DB_BACKEND 토글
+  models.py         # 프로젝트/모듈/settings CRUD
+  migrations.py     # ⚠️ 사용 중단 (Supabase 정본). 참고용으로만 보존
 modules/
-  request/          # 요청 등록 (CRUD + 페이지)
-  approval/         # 승인/반려 (서명 포함)
-  execution/        # 실행 (사진촬영 + 체크리스트)
-  outputs/          # PDF 생성 + 공유
+  request/          # 요청 등록 (Supabase table API)
+  approval/         # 승인/반려 — rpc_approvals_inbox + rpc_approval_mark 사용
+  execution/        # 실행 (사진 → photos 버킷 업로드)
+  outputs/          # PDF 생성 → material-gate 버킷 업로드
   ledger/           # 전체 대장 조회
   schedule/         # 스케줄링 캘린더
   admin/            # 관리자 설정
-shared/             # 공통 유틸 (helpers, signature, share)
-MaterialToolShared/ # 런타임 데이터 (DB, 사진, PDF 출력물)
+  dashboard/        # 일별 KPI
+  profile/          # 내정보
+shared/
+  storage.py        # Supabase Storage 헬퍼 (upload/url/cache_to_local)
+  helpers/signature/share — 공통 유틸
+MaterialToolShared/ # 로컬 캐시 (`tmp_cache/`로 Storage 다운로드 캐시)
+                    # SQLite는 백업본만 보관 (`gate_tool.db.backup-260429`)
 ```
 
 ## 핵심 규칙
 
-### DB
-- SQLite 단일 파일: `MaterialToolShared/gate_tool.db`
-- 모든 CRUD는 `db/` 또는 각 모듈의 `crud.py`에서 처리
+### DB (Supabase Postgres + 하이브리드 인증)
+- 정본은 Supabase 프로젝트 `lwohpplvpbhsqrnqepll` (`material-gate-tool`, ap-northeast-2)
+- 코드에서는 `con_open()` → `Client` 반환. 모든 모듈의 CRUD가 이 Client를 받아서 동작
+- 마이그레이션은 Supabase Dashboard / MCP `apply_migration` 으로 관리 (코드 내 마이그레이션 비활성)
+- 인증: `profiles` 테이블. 신규 가입은 `password_hash`/`salt` (PBKDF2). 기존 supabase_uid 보유 계정은 Supabase Auth 폴백 (`auth/session.py`)
+- 모든 public 테이블 RLS 활성, `anon` 롤 `ALL true` 정책 (추후 강화 예정)
 - `shared.helpers.now_str()` — 타임스탬프, `new_id()` — UUID
 - `project_id`가 모든 테이블의 멀티테넌시 키
+- **롤백 토글**: `secrets.toml`에 `DB_BACKEND="sqlite"` 설정 시 로컬 SQLite 사용 (긴급용)
+
+### Storage (사진/PDF/서명)
+- 버킷 2개: `photos` (public, 사진), `material-gate` (private, PDF/QR/ZIP/서명)
+- 파일은 항상 Storage에 업로드, DB 컬럼에는 객체 경로(`<rid>/<slot>_<hash>.jpg`) 저장
+- 표시 시: `storage_url` 우선, 없으면 `cache_to_local()`로 로컬 캐시 다운로드 후 사용 (PDF/이미지 합성)
+- 레거시 로컬 경로(`C:\...`)도 폴백 지원
 
 ### 상태 머신
 ```

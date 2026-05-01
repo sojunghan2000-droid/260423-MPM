@@ -2,6 +2,7 @@
 
 import streamlit as st
 from supabase import Client
+
 from db.models import modules_for_project, module_toggle, module_toggle_role
 
 

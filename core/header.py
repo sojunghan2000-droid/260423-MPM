@@ -1,52 +1,44 @@
-"""Hero header rendering (Supabase-backed KPI aggregation in Python)."""
+"""Hero header rendering."""
 import streamlit as st
 from datetime import date
 from supabase import Client
+
 from config import APP_VERSION, DEFAULT_SITE_NAME
 from db.models import settings_get
 
 
-def _safe_int(v, default=0) -> int:
-    try:
-        return int(v) if v is not None and str(v).strip() != "" else default
-    except (ValueError, TypeError):
-        return default
-
-
 def ui_header(con: Client):
+    """Render hero header with KPI stats."""
+    # 프로젝트명 우선, 없으면 settings의 site_name 사용
     site_name = st.session_state.get("PROJECT_NAME") or settings_get(con, "site_name", DEFAULT_SITE_NAME)
     user_name = st.session_state.get("USER_NAME", "")
     user_role = st.session_state.get("USER_ROLE", "")
     is_admin = st.session_state.get("IS_ADMIN", False)
     project_id = st.session_state.get("PROJECT_ID", "")
     today = date.today().isoformat()
-
-    rows_res = (
-        con.table("requests")
-        .select("status,vehicle_count")
-        .eq("project_id", project_id)
-        .eq("date", today)
-        .execute()
-    )
-    rows = rows_res.data or []
-
-    total = pending = approved = done = 0
+    res = (con.table("requests").select("status,vehicle_count")
+           .eq("project_id", project_id).eq("date", today).execute())
+    rows = res.data or []
+    total = len(rows)
+    pending = approved = done = 0
     total_v = pending_v = approved_v = done_v = 0
     for r in rows:
-        s = r.get("status") or ""
-        vc = _safe_int(r.get("vehicle_count"), 0)
-        total   += 1
-        total_v += vc
+        s = r.get("status", "")
+        v = r.get("vehicle_count") or 0
+        try:
+            v = int(v)
+        except (TypeError, ValueError):
+            v = 0
+        total_v += v
         if s == "PENDING_APPROVAL":
-            pending   += 1
-            pending_v += vc
+            pending += 1
+            pending_v += v
         elif s in ("APPROVED", "EXECUTING"):
-            approved   += 1
-            approved_v += vc
+            approved += 1
+            approved_v += v
         elif s == "DONE":
-            done   += 1
-            done_v += vc
-
+            done += 1
+            done_v += v
     st.markdown(f"""
     <div class="hero">
       <div class="hero-content">

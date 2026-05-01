@@ -1,4 +1,4 @@
-"""Login and project selection pages (account-based auth, Supabase-backed)."""
+"""Login and project selection pages (account-based auth)."""
 import streamlit as st
 from supabase import Client
 from config import ROLES

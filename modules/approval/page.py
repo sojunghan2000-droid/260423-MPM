@@ -1,4 +1,4 @@
-"""Approval (signature) page (Supabase-backed)."""
+"""Approval (signature) page."""
 
 from datetime import date as _date
 
@@ -13,44 +13,36 @@ from shared.helpers import req_display_id
 
 
 def _pending_my_requests(con: Client, project_id: str, user_name: str):
-    """협력사가 등록한 요청 중 승인 대기 건 — 가장 낮은 PENDING 단계 정보 병합."""
-    reqs = (
-        con.table("requests")
-        .select("id,company_name,item_name,kind,date,time_from,time_to,gate,status,created_at,requester_name")
-        .eq("project_id", project_id)
-        .eq("requester_name", user_name)
-        .eq("status", "PENDING_APPROVAL")
-        .execute()
-    ).data or []
-    if not reqs:
-        return []
-
+    """협력사 사용자가 등록한 요청 중 승인 대기 중인 건 조회."""
+    req_res = (con.table("requests")
+               .select("id,company_name,item_name,kind,date,time_from,time_to,gate,status,created_at")
+               .eq("project_id", project_id)
+               .eq("requester_name", user_name)
+               .eq("status", "PENDING_APPROVAL")
+               .order("created_at", desc=True)
+               .execute())
+    reqs = req_res.data or []
     rids = [r["id"] for r in reqs]
-    appr_pend = (
-        con.table("approvals")
-        .select("req_id,role_required,status,step_no")
-        .eq("status", "PENDING")
-        .in_("req_id", rids)
-        .execute()
-    ).data or []
-
-    min_pend: dict = {}
-    for a in appr_pend:
-        rid = a["req_id"]
-        cur = min_pend.get(rid)
-        if cur is None or (a.get("step_no") or 0) < (cur.get("step_no") or 0):
-            min_pend[rid] = a
-
+    ap_map: dict = {}
+    if rids:
+        ap_res = (con.table("approvals")
+                  .select("req_id,role_required,status,step_no")
+                  .in_("req_id", rids)
+                  .eq("status", "PENDING")
+                  .execute())
+        for ap in ap_res.data or []:
+            cur = ap_map.get(ap["req_id"])
+            if not cur or ap["step_no"] < cur["step_no"]:
+                ap_map[ap["req_id"]] = ap
     out = []
     for r in reqs:
-        ap = min_pend.get(r["id"], {})
+        ap = ap_map.get(r["id"], {}) or {}
         out.append({
             **r,
             "role_required": ap.get("role_required"),
-            "ap_status":     ap.get("status"),
-            "step_no":       ap.get("step_no"),
+            "ap_status": ap.get("status"),
+            "step_no": ap.get("step_no"),
         })
-    out.sort(key=lambda r: r.get("created_at") or "", reverse=True)
     return out
 
 
@@ -66,6 +58,7 @@ def page_approval(con: Client):
     _today = _date.today().isoformat()
     inbox = [i for i in inbox if i.get("date", "") >= _today]
 
+    # ── 협력사: 서명 권한 없음 → 본인 요청의 대기 현황만 표시 ──────────────
     if not inbox and user_role == "협력사":
         pending = _pending_my_requests(con, project_id, user_name)
         if not pending:
@@ -74,6 +67,7 @@ def page_approval(con: Client):
 
         st.caption("📋 내가 등록한 요청 중 승인 대기 중인 건")
         KIND_LABEL = {"IN": "반입", "OUT": "반출"}
+        STATUS_COLOR = {"PENDING_APPROVAL": "#f59e0b"}
 
         for r in pending:
             kind_lbl = KIND_LABEL.get(r.get("kind", ""), r.get("kind", ""))
@@ -96,6 +90,7 @@ def page_approval(con: Client):
             )
         return
 
+    # ── 승인 권한 있는 계정 ───────────────────────────────────────────────
     if not inbox:
         st.info("대기 중인 승인 건이 없습니다.")
         return
@@ -127,7 +122,8 @@ def page_approval(con: Client):
     }
     </style>
     """, unsafe_allow_html=True)
-    sign_path, stamp_path = ui_signature_block(con, rid, "서명 입력", key_prefix=f"ap_{approval_id}")
+    sign_path, stamp_path = ui_signature_block(rid, "서명 입력", key_prefix=f"ap_{approval_id}")
+    st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
     reject_reason = st.text_area("반려 사유(반려 시)", height=60)
     st.markdown("""
     <style>

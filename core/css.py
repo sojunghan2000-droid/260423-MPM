@@ -685,8 +685,8 @@ def inject_css():
     }
     /* ── Sidebar compact ── */
     [data-testid="stSidebar"] {
-      min-width: 200px !important;
-      max-width: 230px !important;
+      min-width: 180px !important;
+      max-width: 200px !important;
     }
     /* ── Compact layout ── */
     [data-testid="stAppViewContainer"] > .main > .block-container {

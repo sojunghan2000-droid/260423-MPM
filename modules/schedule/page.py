@@ -1,5 +1,6 @@
 """Unified 계획 page — schedule timeline + request form side by side."""
 import json
+import uuid
 import streamlit as st
 from datetime import date, timedelta
 
@@ -24,12 +25,12 @@ def _insert_extra_slots(con, project_id, sel_list, add_slots, kind_val, gate,
     ref      = sel_list[0]
     rid      = ref.get("req_id", "")
     sdate    = ref.get("schedule_date", "")
+    bzone    = ref.get("booking_zone", "A")
     if not rid or not sdate:
         return 0
-    _rows = (
-        con.table("schedules").select("time_from").eq("req_id", rid).eq("schedule_date", sdate).execute()
-    ).data or []
-    existing_tf = {r["time_from"] for r in _rows}
+    _ex = (con.table("schedules").select("time_from")
+           .eq("req_id", rid).eq("schedule_date", sdate).execute())
+    existing_tf = {r["time_from"] for r in (_ex.data or [])}
     n_added = 0
     for slot in add_slots:
         if slot in existing_tf:
@@ -53,19 +54,20 @@ def _insert_extra_slots(con, project_id, sel_list, add_slots, kind_val, gate,
             "status":        ref.get("status", "PENDING"),
             "color":         ref.get("color", "#fbbf24"),
             "created_by":    created_by,
+            "booking_zone":  bzone,
         })
         n_added += 1
+    # request time_from/time_to 범위 갱신
     if n_added:
-        _all_tf_rows = (
-            con.table("schedules").select("time_from").eq("req_id", rid)
-            .eq("schedule_date", sdate).order("time_from").execute()
-        ).data or []
-        all_tf = [r["time_from"] for r in _all_tf_rows]
+        _all_res = (con.table("schedules").select("time_from")
+                    .eq("req_id", rid).eq("schedule_date", sdate)
+                    .order("time_from").execute())
+        all_tf = [r["time_from"] for r in (_all_res.data or [])]
         if all_tf:
             last_idx = TIME_SLOTS.index(all_tf[-1]) if all_tf[-1] in TIME_SLOTS else 0
             con.table("requests").update({
                 "time_from": all_tf[0],
-                "time_to":   TIME_SLOTS[min(last_idx + 1, len(TIME_SLOTS) - 1)],
+                "time_to": TIME_SLOTS[min(last_idx + 1, len(TIME_SLOTS) - 1)],
             }).eq("id", rid).execute()
     return n_added
 
@@ -151,6 +153,61 @@ def _has_conflict(slots: list, schedules: list, kind_val: str) -> bool:
     return False
 
 
+@st.dialog("🅿️ 터미널 상태 변경")
+def _terminal_status_dialog(terminal: str, in_n: int, is_freed: bool,
+                             project_id: str, date_str: str, con) -> None:
+    """팝업: 터미널 해제 / 재점유 확인."""
+    st.markdown("""<style>
+    [data-testid="stDialog"] button {
+        min-height: 44px !important;
+        height: 44px !important;
+        font-size: 15px !important;
+    }
+    [data-testid="stDialog"] button p { margin: 0 !important; }
+    </style>""", unsafe_allow_html=True)
+
+    _dot_c  = "#f59e0b" if in_n > 0 else "#22c55e"
+    _status = f"반입 {in_n}건 보관 중" if in_n > 0 else "여유"
+    st.markdown(
+        f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
+        f'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{_dot_c};flex-shrink:0;"></span>'
+        f'<span style="font-size:16px;font-weight:700;">{terminal}</span>'
+        f'<span style="font-size:13px;color:#64748b;">{_status}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    if in_n > 0:
+        # 이전 해제 기록이 남아있으면 자동 초기화 (신규 신청이 들어온 것이므로)
+        if is_freed:
+            (con.table("terminal_releases").delete()
+             .eq("project_id", project_id).eq("terminal", terminal)
+             .eq("release_date", date_str).execute())
+        st.caption("자재가 야적장으로 이동 완료되면 해제하세요.")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("🔓 해제", type="primary", use_container_width=True):
+                con.table("terminal_releases").upsert({
+                    "id": uuid.uuid4().hex,
+                    "project_id": project_id,
+                    "terminal": terminal,
+                    "release_date": date_str,
+                    "created_at": now_str(),
+                    "created_by": st.session_state.get("USER_NAME", ""),
+                }, on_conflict="project_id,terminal,release_date",
+                    ignore_duplicates=True).execute()
+                st.session_state.pop("_term_dlg_trigger", None)
+                st.rerun()
+        with c2:
+            if st.button("취소", use_container_width=True):
+                st.session_state.pop("_term_dlg_trigger", None)
+                st.rerun()
+    else:
+        st.info("현재 예약이 없는 여유 터미널입니다.")
+        if st.button("닫기", use_container_width=True):
+            st.session_state.pop("_term_dlg_trigger", None)
+            st.rerun()
+
+
 def page_schedule(con):
     """Unified schedule calendar + request registration — single screen."""
     st.markdown(f"<style>{get_schedule_css()}</style>", unsafe_allow_html=True)
@@ -176,10 +233,10 @@ def page_schedule(con):
         start_fi = max(0, drop_fi - drag_index)
         date_str = str(st.session_state.get("sched_current_date", date.today()))
         if req_id:
-            group = (
-                con.table("schedules").select("*").eq("req_id", req_id)
-                .eq("schedule_date", date_str).order("time_from").execute()
-            ).data or []
+            _gres = (con.table("schedules").select("*")
+                     .eq("req_id", req_id).eq("schedule_date", date_str)
+                     .order("time_from").execute())
+            group = _gres.data or []
             for i, sched in enumerate(group):
                 nfi = start_fi + i
                 if nfi + 1 >= len(TIME_SLOTS):
@@ -190,7 +247,7 @@ def page_schedule(con):
                 actual_end = min(start_fi + len(group), len(TIME_SLOTS) - 1)
                 con.table("requests").update({
                     "time_from": TIME_SLOTS[start_fi],
-                    "time_to":   TIME_SLOTS[actual_end],
+                    "time_to": TIME_SLOTS[actual_end],
                 }).eq("id", req_id).execute()
         else:
             nf = TIME_SLOTS[drop_fi]
@@ -205,15 +262,15 @@ def page_schedule(con):
         if del_sched:
             req_id   = del_sched.get("req_id")
             date_str = del_sched.get("schedule_date")
-            remaining = (
-                con.table("schedules").select("*").eq("req_id", req_id)
-                .eq("schedule_date", date_str).neq("id", sid).order("time_from").execute()
-            ).data or []
+            _rres = (con.table("schedules").select("*")
+                     .eq("req_id", req_id).eq("schedule_date", date_str)
+                     .neq("id", sid).order("time_from").execute())
+            remaining = _rres.data or []
             schedule_delete(con, sid)
             if remaining and req_id:
                 con.table("requests").update({
                     "time_from": remaining[0]["time_from"],
-                    "time_to":   remaining[-1]["time_to"],
+                    "time_to": remaining[-1]["time_to"],
                 }).eq("id", req_id).execute()
         for k in _ADMIN_KEYS:
             st.session_state.pop(k, None)
@@ -247,10 +304,10 @@ def page_schedule(con):
                 if _req_id in _seen:
                     continue
                 _seen.add(_req_id)
-                _group = (
-                    con.table("schedules").select("*").eq("req_id", _req_id)
-                    .eq("schedule_date", _mv_date).order("time_from").execute()
-                ).data or []
+                _gres2 = (con.table("schedules").select("*")
+                          .eq("req_id", _req_id).eq("schedule_date", _mv_date)
+                          .order("time_from").execute())
+                _group = _gres2.data or []
                 for i, _sched in enumerate(_group):
                     nfi = start_fi + i
                     if nfi + 1 >= len(TIME_SLOTS):
@@ -261,7 +318,7 @@ def page_schedule(con):
                     _actual_end = min(start_fi + len(_group), len(TIME_SLOTS) - 1)
                     con.table("requests").update({
                         "time_from": TIME_SLOTS[start_fi],
-                        "time_to":   TIME_SLOTS[_actual_end],
+                        "time_to": TIME_SLOTS[_actual_end],
                     }).eq("id", _req_id).execute()
         else:
             # req_id 없는 단독 슬롯은 개별 이동
@@ -284,6 +341,7 @@ def page_schedule(con):
         ("sched_last_kind",        "반입"),
         ("user_sel_sched_list",    []),
         ("sched_mobile_show_form", False),
+        ("sched_current_zone",     None),
     ]:
         if key not in st.session_state:
             st.session_state[key] = default
@@ -298,8 +356,86 @@ def page_schedule(con):
         current_date = date.today()
         st.session_state["sched_current_date"] = current_date
     schedule_sync_from_requests(con, project_id)
+    date_str = current_date.isoformat()
+
+    # ── 예약존 로드 ────────────────────────────────────────────────────────
+    try:
+        _bz_all  = json.loads(settings_get(con, "booking_zones_json", '["A"]'))
+        _bz_dis  = json.loads(settings_get(con, "booking_zones_disabled_json", "[]"))
+        booking_zones = [z for z in _bz_all if z not in _bz_dis] or ["A"]
+    except Exception:
+        booking_zones = ["A"]
+
+    if st.session_state.get("sched_current_zone") not in booking_zones:
+        st.session_state["sched_current_zone"] = booking_zones[0]
+    current_zone = st.session_state["sched_current_zone"]
+
+    # ── 관리자 전체 존 현황 그리드 ─────────────────────────────────────────
+    if is_admin and len(booking_zones) > 1:
+        _all_scheds = schedule_list_by_date(con, project_id, date_str)
+        _zone_summary = {}
+        for bz in booking_zones:
+            _zs = [s for s in _all_scheds if s.get("booking_zone") == bz]
+            _in_cnt  = len({s["req_id"] for s in _zs if s.get("kind") == KIND_IN  and s.get("req_id")})
+            _out_cnt = len({s["req_id"] for s in _zs if s.get("kind") == KIND_OUT and s.get("req_id")})
+            _zone_summary[bz] = (_in_cnt, _out_cnt)
+        _th = "".join(
+            f'<th style="padding:6px 10px;text-align:center;background:#1e3a8a;color:#fff;font-size:13px;">'
+            f'{bz}</th>' for bz in booking_zones
+        )
+        _td = "".join(
+            f'<td style="padding:6px 10px;text-align:center;font-size:12px;'
+            f'background:{"#f0fdf4" if _zone_summary[bz][0]+_zone_summary[bz][1]>0 else "#f8fafc"};">'
+            f'{"<span style=\'color:#1d4ed8;font-weight:600;\'>반입 " + str(_zone_summary[bz][0]) + "건</span>" if _zone_summary[bz][0] else ""}'
+            f'{"<br>" if _zone_summary[bz][0] and _zone_summary[bz][1] else ""}'
+            f'{"<span style=\'color:#dc2626;font-weight:600;\'>반출 " + str(_zone_summary[bz][1]) + "건</span>" if _zone_summary[bz][1] else ""}'
+            f'{"—" if not _zone_summary[bz][0] and not _zone_summary[bz][1] else ""}'
+            f'</td>'
+            for bz in booking_zones
+        )
+        st.markdown(
+            f'<div style="overflow-x:auto;margin-bottom:8px;">'
+            f'<table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">'
+            f'<tr>{_th}</tr><tr>{_td}</tr>'
+            f'</table></div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── 존 선택 버튼 (2개 이상일 때만) ────────────────────────────────────
+    if len(booking_zones) > 1:
+        st.markdown("""<style>
+        .st-key-zone_sel_row .stHorizontalBlock { gap: 4px !important; flex-wrap: wrap !important; }
+        [class*="st-key-zone_btn_"] button {
+            min-height: 36px !important; height: 36px !important;
+            font-size: 13px !important; font-weight: 600 !important;
+            padding: 0 8px !important;
+        }
+        [class*="st-key-zone_btn_"] button p { margin: 0 !important; line-height: 1 !important; }
+        </style>""", unsafe_allow_html=True)
+        with st.container(key="zone_sel_row"):
+            _zcols = st.columns(len(booking_zones))
+            for _zi, _bz in enumerate(booking_zones):
+                with _zcols[_zi]:
+                    _is_cur = (_bz == current_zone)
+                    with st.container(key=f"zone_btn_{_zi}"):
+                        if st.button(
+                            f"{'✓ ' if _is_cur else ''}{_bz}",
+                            key=f"zsel_{_zi}",
+                            type="primary" if _is_cur else "secondary",
+                            use_container_width=True,
+                        ):
+                            st.session_state["sched_current_zone"]  = _bz
+                            st.session_state["sched_sel_in_slots"]  = []
+                            st.session_state["sched_sel_out_slots"] = []
+                            st.session_state["user_sel_sched_list"] = []
+                            st.session_state.pop("admin_sel_sched_ids",  None)
+                            st.session_state.pop("admin_sel_sched_list", None)
+                            st.session_state.pop("sched_edit_from_home", None)
+                            st.rerun()
+        st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
 
     col_left, col_right = st.columns([3, 2], gap="large")
+    _occupied_terminals: set = set()   # 당일 점유 중 터미널 (드롭다운 필터용)
 
     # ── 모바일: 타임라인 ↔ 폼 전환 CSS ──────────────────────────────────────
     _mbf = st.session_state.get("sched_mobile_show_form", False)
@@ -416,26 +552,157 @@ def page_schedule(con):
                     st.rerun()
 
         st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
-        date_str  = current_date.isoformat()
-        schedules = schedule_list_by_date(con, project_id, date_str)
+
+        schedules = schedule_list_by_date(con, project_id, date_str, booking_zone=current_zone)
 
         # schedules에 requester_name 첨부 (본인 예약 식별용)
         _req_ids = [s["req_id"] for s in schedules if s.get("req_id")]
         if _req_ids:
-            _rows = (
-                con.table("requests").select("id,requester_name").in_("id", _req_ids).execute()
-            ).data or []
-            _rmap = {r["id"]: (r["requester_name"] or "") for r in _rows}
+            _rres = (con.table("requests").select("id,requester_name")
+                     .in_("id", _req_ids).execute())
+            _rmap = {r["id"]: (r["requester_name"] or "") for r in (_rres.data or [])}
         else:
             _rmap = {}
         for s in schedules:
             s["requester_name"] = _rmap.get(s.get("req_id", ""), "")
 
+        # ── 터미널 점유 현황 카드 (터미널 사용 존일 때만) ─────────────────────
+        try:
+            _tz_all_card      = json.loads(settings_get(con, "gate_zones_json", "[]"))
+            _tz_dis_card      = json.loads(settings_get(con, "gate_zones_disabled_json", "[]"))
+            _tz_opts_card     = [z for z in _tz_all_card if z not in _tz_dis_card]
+            _terminal_zs_card = json.loads(settings_get(con, "terminal_zones_json", '["A"]'))
+        except Exception:
+            _tz_opts_card = []
+            _terminal_zs_card = ["A"]
+
+        if current_zone in _terminal_zs_card and _tz_opts_card:
+            # 반입 건수 집계 — requests 직접 조회 (신청 즉시 반영)
+            # booking_zone 필터 제거: terminal_zones_json으로 이미 존 제한됨
+            _tocc: dict = {t: set() for t in _tz_opts_card}
+            _tcomp: dict = {t: [] for t in _tz_opts_card}   # 터미널별 업체명 목록
+            _overdue_terminals: set = set()   # 2일 초과 점유 터미널
+            _ovd_threshold = (date.today() - timedelta(days=2)).isoformat()
+            _occ_res = (con.table("requests")
+                        .select("id,gate,company_name,created_at")
+                        .eq("project_id", project_id).eq("date", date_str)
+                        .eq("kind", KIND_IN).neq("status", "REJECTED")
+                        .not_.is_("gate", "null").neq("gate", "").neq("gate", "선택")
+                        .execute())
+            for _row in (_occ_res.data or []):
+                _rd   = _row
+                _g    = (_rd.get("gate") or "").strip()
+                _rid  = _rd.get("id", "")
+                _cat  = (_rd.get("created_at") or "")[:10]  # YYYY-MM-DD 부분만
+                _cname = (_rd.get("company_name") or "").strip()
+                if _g in _tocc and _rid:
+                    _tocc[_g].add(_rid)
+                    if _cname and _cname not in _tcomp[_g]:
+                        _tcomp[_g].append(_cname)
+                    if _cat < _ovd_threshold:   # 생성일이 2일 초과 전이면 overdue
+                        _overdue_terminals.add(_g)
+
+            # 드롭다운 필터용: 점유 중 터미널 집합
+            _occupied_terminals = {t for t, rids in _tocc.items() if rids}
+
+            # 당일 해제된 터미널 목록 조회
+            _tr_res = (con.table("terminal_releases").select("terminal")
+                       .eq("project_id", project_id).eq("release_date", date_str)
+                       .execute())
+            _released = {r["terminal"] for r in (_tr_res.data or [])}
+
+
+            # 팝업 다이얼로그 트리거
+            if st.session_state.pop("_term_dlg_trigger", False):
+                _terminal_status_dialog(
+                    st.session_state.get("_term_dlg_terminal", ""),
+                    st.session_state.get("_term_dlg_in_n", 0),
+                    st.session_state.get("_term_dlg_freed", False),
+                    project_id, date_str, con,
+                )
+
+            # CSS — 카드형 버튼 스타일
+            st.markdown("""<style>
+            .st-key-term_card_wrap { margin-bottom: 8px; }
+            .st-key-term_card_wrap .stHorizontalBlock { gap: 4px !important; }
+            .st-key-term_card_wrap [data-testid="stElementContainer"] { margin-bottom: 4px !important; }
+            [class*="st-key-tcard_occ_"] button {
+                background: #fef9c3 !important; border-color: #fcd34d !important;
+                color: #92400e !important; text-align: center !important;
+                min-height: 32px !important; height: 32px !important;
+                font-size: 11px !important; padding: 0 4px !important;
+                justify-content: center !important; width: 100% !important;
+                border-radius: 4px !important;
+            }
+            [class*="st-key-tcard_free_"] button {
+                background: #dcfce7 !important; border-color: #86efac !important;
+                color: #15803d !important; text-align: center !important;
+                min-height: 32px !important; height: 32px !important;
+                font-size: 11px !important; padding: 0 4px !important;
+                justify-content: center !important; width: 100% !important;
+                border-radius: 4px !important;
+            }
+            [class*="st-key-tcard_ovd_"] button {
+                background: #fee2e2 !important; border-color: #fca5a5 !important;
+                color: #991b1b !important; text-align: center !important;
+                min-height: 32px !important; height: 32px !important;
+                padding: 0 6px !important; font-weight: 600 !important;
+                justify-content: center !important; width: 100% !important;
+                border-radius: 4px !important;
+            }
+            [class*="st-key-tcard_occ_"] button p,
+            [class*="st-key-tcard_free_"] button p,
+            [class*="st-key-tcard_ovd_"] button p {
+                margin: 0 !important; font-size: 11px !important;
+                white-space: nowrap !important; overflow: hidden !important;
+                text-overflow: ellipsis !important;
+            }
+            </style>""", unsafe_allow_html=True)
+
+            st.markdown('<div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:10px;">🅿️ 터미널 점유 현황</div>', unsafe_allow_html=True)
+            with st.container(key="term_card_wrap"):
+                _quads = [_tz_opts_card[i:i+4] for i in range(0, len(_tz_opts_card), 4)]
+                for _pi, _quad in enumerate(_quads):
+                    _pcols = st.columns(4)
+                    for _ci, _t in enumerate(_quad):
+                        _in_n    = len(_tocc[_t])
+                        _freed   = _t in _released
+                        # 신규 신청이 있으면 해제 여부 무관하게 점유 표시
+                        _is_free = _in_n == 0
+                        _is_ovd  = (not _is_free) and (_t in _overdue_terminals)
+                        _cnt_txt = f" ×{_in_n}" if _in_n > 1 else ""
+                        _emoji   = '🟢' if _is_free else ('🔴' if _is_ovd else '🟡')
+                        _label   = f"{_emoji}  {_t}{_cnt_txt}"
+                        _ctype   = "free" if _is_free else ("ovd" if _is_ovd else "occ")
+                        _comp_names = _tcomp.get(_t, [])
+                        _comp_txt = ", ".join(_comp_names) if _comp_names else ""
+                        with _pcols[_ci]:
+                            with st.container(key=f"tcard_{_ctype}_{_pi}_{_ci}"):
+                                if st.button(_label, key=f"tcard_btn_{_pi}_{_ci}",
+                                             use_container_width=True):
+                                    if not _is_free or (_freed and _in_n > 0):
+                                        st.session_state["_term_dlg_trigger"]  = True
+                                        st.session_state["_term_dlg_terminal"] = _t
+                                        st.session_state["_term_dlg_in_n"]     = _in_n
+                                        st.session_state["_term_dlg_freed"]    = _freed
+                                        st.rerun()
+                                if _comp_txt:
+                                    _ctxt_color = "#991b1b" if _is_ovd else "#92400e"
+                                    st.markdown(
+                                        f'<div style="font-size:10px;color:{_ctxt_color};'
+                                        f'text-align:center;margin-top:-8px;margin-bottom:10px;'
+                                        f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+                                        f'max-width:100%;" title="{_comp_txt}">{_comp_txt}</div>',
+                                        unsafe_allow_html=True,
+                                    )
+
         if is_admin:
             in_items  = [s for s in schedules if s.get("kind") == KIND_IN]
             out_items = [s for s in schedules if s.get("kind") == KIND_OUT]
-            _from_home_tl = st.session_state.get("sched_edit_from_home", False)
-            _in_edit_mode = bool(st.session_state.get("admin_sel_sched_list")) and _from_home_tl
+            _from_home_tl  = st.session_state.get("sched_edit_from_home", False)
+            _in_edit_mode  = bool(st.session_state.get("admin_sel_sched_list")) and _from_home_tl
+            _has_view_sel  = bool(st.session_state.get("admin_sel_sched_ids")) and not _from_home_tl
+            _add_time_mode = _has_view_sel  # 뷰 모드 슬롯 선택 시 이동 대신 추가 허용
             dnd_result = dnd_timeline(
                 slots=TIME_SLOTS,
                 in_schedules=in_items,
@@ -446,6 +713,7 @@ def page_schedule(con):
                 sel_out_slots=st.session_state.get("sched_sel_out_slots", []),
                 admin_sel_kind=st.session_state.get("admin_sel_sched_kind"),
                 in_edit_mode=_in_edit_mode,
+                add_time_mode=_add_time_mode,
                 key="admin_dnd",
             )
             # 새 이벤트인지 확인 (ts 기반 중복 방지)
@@ -505,6 +773,7 @@ def page_schedule(con):
                     st.rerun()
         else:
             user_sel_ids_cur = [s["id"] for s in st.session_state.get("user_sel_sched_list", [])]
+            _user_has_view_sel = bool(st.session_state.get("user_sel_sched_list"))
             user_dnd = dnd_timeline(
                 slots=TIME_SLOTS,
                 in_schedules=[s for s in schedules if s.get("kind") == KIND_IN],
@@ -514,6 +783,7 @@ def page_schedule(con):
                 sel_out_slots=st.session_state.get("sched_sel_out_slots", []),
                 username=user_name,
                 user_sel_ids=user_sel_ids_cur,
+                add_time_mode=_user_has_view_sel,
                 key="user_dnd",
             )
             if user_dnd and user_dnd.get("ts") != st.session_state.get("_user_dnd_ts"):
@@ -569,17 +839,14 @@ def page_schedule(con):
         admin_sel_list = st.session_state.get("admin_sel_sched_list", [])
         user_sel_list  = st.session_state.get("user_sel_sched_list", []) if not is_admin else []
         _from_home     = st.session_state.get("sched_edit_from_home", False)
-        is_admin_edit  = is_admin and bool(admin_sel_list) and _from_home
-        is_user_edit   = not is_admin and bool(user_sel_list) and _from_home
+        # 타임라인 직접 선택도 편집 모드로 동작 (_from_home 조건 제거)
+        is_admin_edit  = is_admin and bool(admin_sel_list)
+        is_user_edit   = not is_admin and bool(user_sel_list)
         is_edit        = is_admin_edit or is_user_edit
         sel_list       = admin_sel_list if is_admin_edit else user_sel_list
 
         st.markdown("#### 📝 반입·반출 예약 신청")
-        # 홈 수정 버튼 없이 타임라인에서 직접 선택한 경우 안내
-        _has_sel_no_home = (
-            (is_admin and bool(admin_sel_list) and not _from_home) or
-            (not is_admin and bool(user_sel_list) and not _from_home)
-        )
+        _has_sel_no_home = False  # 직접 선택도 편집 허용으로 변경
         st.components.v1.html("""
         <script>
         (function() {
@@ -621,7 +888,7 @@ def page_schedule(con):
             times = sorted(s.get("time_from", "") for s in sel_list)
             can_delete = is_admin_edit or ref.get("status") == "PENDING"
             if is_admin_edit:
-                st.caption("⬅️ 타임라인 [→ 이동]: 시간 이동 | 아래 폼: 내용 수정 후 저장")
+                st.caption("✏️ 내용 수정 후 저장 | 타임라인 [→ 이동]: 시간 이동")
             else:
                 st.caption("✏️ 내 예약 수정 | 승인 전(대기중)만 삭제 가능")
             _edit_date = ref.get("schedule_date", str(current_date))
@@ -672,7 +939,7 @@ def page_schedule(con):
                 "DONE": "완료", "REJECTED": "반려됨",
             }
             _vstatus = _vstatus_label.get(ref.get("status", ""), ref.get("status", ""))
-            st.caption("📋 선택된 예약 정보 (읽기 전용) | 수정은 홈 화면 수정 버튼 이용")
+            st.caption("📋 선택된 예약 정보 | 타임라인 빈 슬롯 클릭 → 시간 연장 가능")
             st.markdown(
                 f'<div style="font-size:14px;background:#f0f9ff;border:1px solid #bae6fd;'
                 f'border-radius:6px;padding:6px 10px;margin-bottom:8px;">'
@@ -681,6 +948,24 @@ def page_schedule(con):
                 f'padding:2px 8px;border-radius:10px;">{_vstatus}</span></div>',
                 unsafe_allow_html=True,
             )
+            # 추가 슬롯 선택 표시 (view 모드에서 시간 연장)
+            _vref_kind  = ref.get("kind", KIND_IN)
+            _vadd_key   = "sched_sel_in_slots" if _vref_kind == KIND_IN else "sched_sel_out_slots"
+            _vcur_add_v = sorted(st.session_state.get(_vadd_key, []))
+            if _vcur_add_v:
+                st.markdown(
+                    f'<div style="font-size:13px;background:#f0fdf4;border:1px solid #86efac;'
+                    f'border-radius:6px;padding:6px 10px;margin-bottom:4px;">'
+                    f'➕ 추가 예정: <b>{_format_slot_ranges(_vcur_add_v)}</b></div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    '<div style="font-size:12px;color:#64748b;background:#f8fafc;'
+                    'border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;margin-bottom:4px;">'
+                    '⬅️ 타임라인에서 추가할 시간 슬롯을 클릭해 선택하세요.</div>',
+                    unsafe_allow_html=True,
+                )
             def_company   = req.get("company_name", ref.get("company_name", ""))
             def_item      = req.get("item_name", "")
             def_loading   = req.get("loading_method", "")
@@ -759,13 +1044,20 @@ def page_schedule(con):
             # 슬롯 선택이 바뀌면 폼 위젯 기본값도 갱신되도록 key에 시간 포함
             form_key    = f"req_unified_form_{sel_from}_{sel_to}"
 
-        # ── Zone 옵션 로드 (비활성 제외) ─────────────────────────────────
+        # ── 터미널 옵션 로드 (비활성 제외) ───────────────────────────────────
         try:
             _zone_all      = json.loads(settings_get(con, "gate_zones_json", "[]"))
             _zone_disabled = json.loads(settings_get(con, "gate_zones_disabled_json", "[]"))
             _zone_options  = [z for z in _zone_all if z not in _zone_disabled]
         except Exception:
             _zone_options = []
+
+        # 현재 예약존에서 터미널 선택이 필요한지 확인
+        try:
+            _terminal_zones = json.loads(settings_get(con, "terminal_zones_json", '["A"]'))
+        except Exception:
+            _terminal_zones = ["A"]
+        _use_terminal = current_zone in _terminal_zones
 
         # ── 통합 폼 ───────────────────────────────────────────────────────
         with st.form(form_key, clear_on_submit=False):
@@ -778,12 +1070,10 @@ def page_schedule(con):
             st.markdown("---")
 
             st.markdown("""<style>
-            .st-key-gate_row .stHorizontalBlock,
             .st-key-vehicle_row .stHorizontalBlock,
             .st-key-worker_row .stHorizontalBlock {
                 flex-wrap: nowrap !important;
             }
-            .st-key-gate_row .stHorizontalBlock > [data-testid="stColumn"],
             .st-key-vehicle_row .stHorizontalBlock > [data-testid="stColumn"],
             .st-key-worker_row .stHorizontalBlock > [data-testid="stColumn"] {
                 flex: 1 1 0 !important;
@@ -792,54 +1082,37 @@ def page_schedule(con):
             }
             </style>""", unsafe_allow_html=True)
 
-            # Zone 드롭다운 옵션 (관리자 설정값)
-            _zopts = ["선택"] + _zone_options
-            def _zone_sel(cur_val):
-                return st.selectbox("Zone *", options=_zopts,
-                                    index=_zopts.index(cur_val) if cur_val in _zopts else 0)
+            # 터미널 드롭다운 헬퍼 — 점유 중 터미널 제외 (편집 모드 현재값 유지)
+            def _terminal_sel(cur_val: str, key_sfx: str = ""):
+                _match = cur_val.split("|")[0].strip() if "|" in cur_val else cur_val
+                # 점유 중이 아닌 터미널만 표시 (편집 모드 기존 선택값은 예외)
+                _avail = [z for z in _zone_options
+                          if z not in _occupied_terminals or z == _match]
+                _occ_cnt = len(_zone_options) - len(_avail)
+                _opts = ["선택"] + _avail
+                _idx  = _opts.index(_match) if _match in _opts else 0
+                _label = f"터미널 * ({_occ_cnt}개 점유중)" if _occ_cnt else "터미널 *"
+                return st.selectbox(_label, options=_opts, index=_idx,
+                                    key=f"terminal_sel{key_sfx}" if key_sfx else None)
 
             if is_admin_edit or is_view_only:
                 new_kind = st.selectbox("구분 *", ["반입", "반출"], index=def_kind_i)
-                with st.container(key="gate_row"):
-                    gr1, gr2 = st.columns(2)
-                    with gr1:
-                        gate_zone = _zone_sel(def_gate_zone)
-                    with gr2:
-                        gate_place = st.text_input("장소 *", value=def_gate_place, placeholder="예) 201동 주변")
-                gate = f"{gate_zone}|{gate_place}" if gate_place else gate_zone
+                gate = _terminal_sel(def_gate_zone, "_adm") if _use_terminal else def_gate_zone
             elif is_edit:
-                # 일반 사용자 수정: 구분 변경 불가, gate만 수정 가능
-                with st.container(key="gate_row"):
-                    gr1, gr2 = st.columns(2)
-                    with gr1:
-                        gate_zone = _zone_sel(def_gate_zone)
-                    with gr2:
-                        gate_place = st.text_input("장소 *", value=def_gate_place, placeholder="예) 201동 주변")
-                gate = f"{gate_zone}|{gate_place}" if gate_place else gate_zone
+                # 일반 사용자 수정: 터미널 존이면 수정 가능, 아니면 유지
+                gate = _terminal_sel(def_gate_zone, "_usr") if _use_terminal else def_gate_zone
             else:
                 # 신규 신청
                 if is_admin:
                     new_kind = last_kind
-                    with st.container(key="gate_row"):
-                        gr1, gr2 = st.columns(2)
-                        with gr1:
-                            gate_zone = _zone_sel(def_gate_zone)
-                        with gr2:
-                            gate_place = st.text_input("장소 *", value=def_gate_place, placeholder="예) 201동 주변")
-                    gate = f"{gate_zone}|{gate_place}" if gate_place else gate_zone
+                    gate = _terminal_sel("", "_new_adm") if _use_terminal else ""
                     admin_req_date = current_date
                     admin_tf = sel_from
                     admin_tt = sel_to
                 else:
-                    # 일반 사용자: 구분 + Zone/장소
+                    # 일반 사용자: 구분 + 터미널(해당 존만)
                     new_kind = st.selectbox("구분 *", ["반입", "반출"], index=def_kind_i)
-                    with st.container(key="gate_row"):
-                        gr1, gr2 = st.columns(2)
-                        with gr1:
-                            gate_zone = _zone_sel(def_gate_zone)
-                        with gr2:
-                            gate_place = st.text_input("장소 *", value=def_gate_place, placeholder="예) 201동 주변")
-                    gate = f"{gate_zone}|{gate_place}" if gate_place else gate_zone
+                    gate = _terminal_sel("", "_new_usr") if _use_terminal else ""
 
             with st.container(key="vehicle_row"):
                 fv1, fv2 = st.columns(2)
@@ -860,6 +1133,7 @@ def page_schedule(con):
             notes        = st.text_input("비고", value=def_notes,
                                          placeholder="예) 파레트 타입 포장, 지게차 양중 시 주의")
 
+            save_extra = False
             if is_edit:
                 ca, cb = st.columns(2)
                 with ca:
@@ -876,10 +1150,17 @@ def page_schedule(con):
                         )
                 submitted = False
             elif is_view_only:
+                _vl_f  = admin_sel_list if is_admin else user_sel_list
+                _vkf   = _vl_f[0].get("kind", KIND_IN) if _vl_f else KIND_IN
+                _vakf  = "sched_sel_in_slots" if _vkf == KIND_IN else "sched_sel_out_slots"
+                _vadf  = sorted(st.session_state.get(_vakf, []))
                 st.markdown("---")
+                with st.container(key="sched_add_slot_btn"):
+                    save_extra = st.form_submit_button(
+                        "확정", type="primary", use_container_width=True)
                 st.markdown(
-                    '<div style="text-align:center;color:#64748b;font-size:12px;padding:6px 0;">'
-                    '✏️ 수정하려면 홈 화면 목록의 <b>수정</b> 버튼을 이용하세요.</div>',
+                    '<div style="text-align:center;color:#64748b;font-size:11px;padding-top:4px;">'
+                    '✏️ 내용 수정은 홈 화면 <b>수정</b> 버튼을 이용하세요.</div>',
                     unsafe_allow_html=True,
                 )
                 save = delete = submitted = False
@@ -890,12 +1171,37 @@ def page_schedule(con):
                                                       use_container_width=True)
                 save = delete = False
 
+        # ── 추가 슬롯 저장 (뷰 모드 시간 연장) ──────────────────────────────
+        if is_view_only and save_extra:
+            _vl_s   = admin_sel_list if is_admin else user_sel_list
+            _vref_s = _vl_s[0] if _vl_s else {}
+            _vkind_s = _vref_s.get("kind", KIND_IN)
+            _vadk_s  = "sched_sel_in_slots" if _vkind_s == KIND_IN else "sched_sel_out_slots"
+            _vadd_s  = sorted(st.session_state.get(_vadk_s, []))
+            if not _vadd_s:
+                st.warning("⬅️ 타임라인에서 추가할 시간 슬롯을 먼저 선택해주세요.")
+            else:
+                n_add = _insert_extra_slots(
+                    con, project_id, _vl_s, _vadd_s,
+                    _vkind_s,
+                    _vref_s.get("gate", ""),
+                    _vref_s.get("company_name", ""),
+                    _vref_s.get("vehicle_info", ""),
+                    user_name,
+                )
+                st.session_state.pop("sched_sel_in_slots", None)
+                st.session_state.pop("sched_sel_out_slots", None)
+                if n_add:
+                    st.success(f"✅ {n_add}개 슬롯이 추가되었습니다.")
+                    st.rerun()
+                else:
+                    st.warning("추가할 슬롯이 없습니다. (이미 예약된 시간대)")
+
         # ── 수정 저장 ─────────────────────────────────────────────────────
         if is_edit and save:
             save_errors = []
             if not loading_method.strip():                    save_errors.append("상·하차 방식")
-            if gate_zone == "선택":                           save_errors.append("Zone")
-            if not gate_place.strip():                        save_errors.append("장소")
+            if _use_terminal and gate == "선택":              save_errors.append("터미널")
             if not worker_supervisor.strip():  save_errors.append("작업지휘자")
             if not worker_guide.strip():       save_errors.append("유도원")
             if not worker_manager.strip():     save_errors.append("담당자")
@@ -912,28 +1218,26 @@ def page_schedule(con):
                     if _rid:
                         updated_req_ids.add(_rid)
                 # ① requests 테이블 업데이트
-                _req_payload = {
-                    "company_name":      company_name.strip(),
-                    "item_name":         item_name.strip(),
-                    "loading_method":    loading_method.strip(),
-                    "kind":              new_kind_val,
-                    "gate":              gate,
-                    "vehicle_ton":       final_ton,
-                    "vehicle_count":     int(vehicle_count or 1),
-                    "worker_supervisor": worker_supervisor.strip(),
-                    "worker_guide":      worker_guide.strip(),
-                    "worker_manager":    worker_manager.strip(),
-                    "notes":             notes.strip(),
-                    "updated_at":        now_str(),
-                }
                 for rid in updated_req_ids:
-                    con.table("requests").update(_req_payload).eq("id", rid).execute()
+                    con.table("requests").update({
+                        "company_name": company_name.strip(),
+                        "item_name": item_name.strip(),
+                        "loading_method": loading_method.strip(),
+                        "kind": new_kind_val,
+                        "gate": gate,
+                        "vehicle_ton": final_ton,
+                        "vehicle_count": int(vehicle_count or 1),
+                        "worker_supervisor": worker_supervisor.strip(),
+                        "worker_guide": worker_guide.strip(),
+                        "worker_manager": worker_manager.strip(),
+                        "notes": notes.strip(),
+                        "updated_at": now_str(),
+                    }).eq("id", rid).execute()
                 # ② 동일 req_id의 모든 schedules 슬롯 일괄 업데이트
                 for rid in updated_req_ids:
-                    _sched_rows = (
-                        con.table("schedules").select("id").eq("req_id", rid).execute()
-                    ).data or []
-                    for _row in _sched_rows:
+                    _sids = (con.table("schedules").select("id")
+                             .eq("req_id", rid).execute())
+                    for _row in (_sids.data or []):
                         schedule_update(con, _row["id"],
                                         company_name=company_name.strip(),
                                         kind=new_kind_val, gate=gate)
@@ -954,30 +1258,24 @@ def page_schedule(con):
                 # 일반 사용자 — 본인 예약만 수정 (requester_name 조건)
                 rid = ref.get("req_id")
                 if rid:
-                    # ① requests 테이블 업데이트 — requester_name 일치할 때만
-                    _existing = (
-                        con.table("requests").select("id").eq("id", rid)
-                        .eq("requester_name", user_name).limit(1).execute()
-                    )
-                    if _existing.data:
-                        con.table("requests").update({
-                            "company_name":      company_name.strip(),
-                            "item_name":         item_name.strip(),
-                            "loading_method":    loading_method.strip(),
-                            "gate":              gate,
-                            "vehicle_ton":       final_ton,
-                            "vehicle_count":     int(vehicle_count or 1),
-                            "worker_supervisor": worker_supervisor.strip(),
-                            "worker_guide":      worker_guide.strip(),
-                            "worker_manager":    worker_manager.strip(),
-                            "notes":             notes.strip(),
-                            "updated_at":        now_str(),
-                        }).eq("id", rid).eq("requester_name", user_name).execute()
+                    # ① requests 테이블 업데이트
+                    (con.table("requests").update({
+                        "company_name": company_name.strip(),
+                        "item_name": item_name.strip(),
+                        "loading_method": loading_method.strip(),
+                        "gate": gate,
+                        "vehicle_ton": final_ton,
+                        "vehicle_count": int(vehicle_count or 1),
+                        "worker_supervisor": worker_supervisor.strip(),
+                        "worker_guide": worker_guide.strip(),
+                        "worker_manager": worker_manager.strip(),
+                        "notes": notes.strip(),
+                        "updated_at": now_str(),
+                    }).eq("id", rid).eq("requester_name", user_name).execute())
                     # ② 동일 req_id의 모든 schedules 슬롯 일괄 업데이트
-                    _sched_rows = (
-                        con.table("schedules").select("id").eq("req_id", rid).execute()
-                    ).data or []
-                    for _row in _sched_rows:
+                    _sids2 = (con.table("schedules").select("id")
+                              .eq("req_id", rid).execute())
+                    for _row in (_sids2.data or []):
                         schedule_update(con, _row["id"], company_name=company_name.strip(), gate=gate)
                 # 추가 슬롯 삽입 (일반 사용자)
                 add_kind_user = ref.get("kind", KIND_IN)
@@ -1004,7 +1302,8 @@ def page_schedule(con):
                 _sdel(con, ref["id"])
                 rid = ref.get("req_id")
                 if rid:
-                    con.table("requests").delete().eq("id", rid).eq("requester_name", user_name).execute()
+                    (con.table("requests").delete()
+                     .eq("id", rid).eq("requester_name", user_name).execute())
                 for k in _USER_KEYS:
                     st.session_state.pop(k, None)
                 st.session_state.pop("sched_edit_from_home", None)
@@ -1021,8 +1320,7 @@ def page_schedule(con):
             if not company_name.strip():                      errors.append("업체명")
             if not item_name.strip():                         errors.append("자재종류")
             if not loading_method.strip():                    errors.append("상·하차 방식")
-            if gate_zone == "선택":                           errors.append("Zone")
-            if not gate_place.strip():                        errors.append("장소")
+            if _use_terminal and gate == "선택":              errors.append("터미널")
             if not vehicle_ton.strip():        errors.append("차량 규격")
             if not worker_supervisor.strip():  errors.append("작업지휘자")
             if not worker_guide.strip():       errors.append("유도원")
@@ -1060,6 +1358,7 @@ def page_schedule(con):
                     requester_name=st.session_state.get("USER_NAME", ""),
                     requester_role=st.session_state.get("USER_ROLE", ""),
                     risk_level="MID", sic_training_url="",
+                    booking_zone=st.session_state.get("sched_current_zone", "A"),
                 ))
                 approvals_create_default(con, rid, kind_val)
                 disp = req_display_id(req_get(con, rid) or {"id": rid})

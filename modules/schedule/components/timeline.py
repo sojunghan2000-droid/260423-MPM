@@ -20,11 +20,11 @@ def _is_blocked(items: List[Dict[str, Any]]) -> bool:
 
 
 def _booked_label(items: List[Dict[str, Any]]) -> str:
-    """업체명 최대 4자 (초과 시 잘라서 반환, 2줄 없음)"""
+    """업체명 최대 5자 (초과 시 잘라서 반환, 2줄 없음)"""
     if not items:
         return ""
     name = items[0]["company_name"]
-    return name[:4]
+    return name[:5]
 
 
 def _toggle(key: str, slot: str) -> None:
@@ -111,13 +111,13 @@ def render_timeline(schedules: List[Dict[str, Any]], is_admin: bool = False, use
     [class*="st-key-tl_row_"] [data-testid="stHorizontalBlock"],
     .st-key-tl_header [data-testid="stHorizontalBlock"] { column-gap: 8px !important; }
     [class*="st-key-tl_row_"] [data-testid="stColumn"]:not(:first-child) button {
-      font-size: 14px !important; padding: 0 4px !important;
+      font-size: 12px !important; padding: 0 2px !important;
       min-height: 28px !important; display: flex !important;
       align-items: center !important; justify-content: center !important;
       overflow: hidden !important;
     }
     [class*="st-key-tl_row_"] [data-testid="stColumn"]:not(:first-child) button p {
-      font-size: 14px !important; line-height: 1 !important; margin: 0 !important;
+      font-size: 12px !important; line-height: 1 !important; margin: 0 !important;
       white-space: nowrap !important; overflow: hidden !important;
       text-overflow: clip !important; max-width: 100% !important;
     }

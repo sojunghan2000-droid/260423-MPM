@@ -17,21 +17,92 @@ try:
 except Exception:
     pass
 
-# 한글 폰트 등록
+# 한글 폰트 등록 — 번들 NanumGothic 우선, OS별 fallback
+import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+KOREAN_FONT_REGISTERED = False
+KOREAN_FONT_DIAG: Dict[str, Any] = {
+    "normal_path": None,
+    "bold_path": None,
+    "errors": [],
+    "bundle_dir": None,
+    "bundle_dir_exists": False,
+    "bundle_dir_contents": [],
+}
+
 _FONT_NORMAL = "Helvetica"
 _FONT_BOLD   = "Helvetica-Bold"
-try:
-    import os
-    _malgun     = "C:/Windows/Fonts/malgun.ttf"
-    _malgun_bd  = "C:/Windows/Fonts/malgunbd.ttf"
-    if os.path.exists(_malgun):
-        pdfmetrics.registerFont(TTFont("MalgunGothic", _malgun))
-        _FONT_NORMAL = "MalgunGothic"
-    if os.path.exists(_malgun_bd):
-        pdfmetrics.registerFont(TTFont("MalgunGothic-Bold", _malgun_bd))
-        _FONT_BOLD = "MalgunGothic-Bold"
-except Exception:
-    pass
+
+_BUNDLE_DIR = os.path.join(os.path.dirname(__file__), "fonts")
+KOREAN_FONT_DIAG["bundle_dir"] = _BUNDLE_DIR
+KOREAN_FONT_DIAG["bundle_dir_exists"] = os.path.isdir(_BUNDLE_DIR)
+if KOREAN_FONT_DIAG["bundle_dir_exists"]:
+    try:
+        KOREAN_FONT_DIAG["bundle_dir_contents"] = os.listdir(_BUNDLE_DIR)
+    except Exception as _e:
+        KOREAN_FONT_DIAG["errors"].append(f"listdir({_BUNDLE_DIR}): {_e}")
+
+_candidates_normal = [
+    os.path.join(_BUNDLE_DIR, "NanumGothic.ttf"),       # 번들 (Cloud/Linux 최우선)
+    "C:/Windows/Fonts/malgun.ttf",                      # Windows 로컬
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",  # Linux apt
+    "/usr/share/fonts/nanum/NanumGothic.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+]
+_candidates_bold = [
+    os.path.join(_BUNDLE_DIR, "NanumGothicBold.ttf"),
+    "C:/Windows/Fonts/malgunbd.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+    "/usr/share/fonts/nanum/NanumGothicBold.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+]
+
+for _p in _candidates_normal:
+    if not os.path.exists(_p):
+        continue
+    try:
+        sz = os.path.getsize(_p)
+        if sz < 100_000:
+            KOREAN_FONT_DIAG["errors"].append(f"{_p}: file too small ({sz}B)")
+            continue
+        pdfmetrics.registerFont(TTFont("KoreanFont", _p))
+        _FONT_NORMAL = "KoreanFont"
+        KOREAN_FONT_DIAG["normal_path"] = _p
+        KOREAN_FONT_REGISTERED = True
+        logger.info(f"[PDF] Korean font (normal) registered: {_p} ({sz}B)")
+        break
+    except Exception as _e:
+        KOREAN_FONT_DIAG["errors"].append(f"register({_p}): {_e}")
+        logger.warning(f"[PDF] Failed to register {_p}: {_e}")
+
+for _p in _candidates_bold:
+    if not os.path.exists(_p):
+        continue
+    try:
+        sz = os.path.getsize(_p)
+        if sz < 100_000:
+            KOREAN_FONT_DIAG["errors"].append(f"{_p}: file too small ({sz}B)")
+            continue
+        pdfmetrics.registerFont(TTFont("KoreanFont-Bold", _p))
+        _FONT_BOLD = "KoreanFont-Bold"
+        KOREAN_FONT_DIAG["bold_path"] = _p
+        logger.info(f"[PDF] Korean font (bold) registered: {_p} ({sz}B)")
+        break
+    except Exception as _e:
+        KOREAN_FONT_DIAG["errors"].append(f"register_bold({_p}): {_e}")
+        logger.warning(f"[PDF] Failed to register bold {_p}: {_e}")
+
+if not KOREAN_FONT_REGISTERED:
+    logger.error(
+        f"[PDF] ⚠️ Korean font NOT registered! "
+        f"BUNDLE_DIR={_BUNDLE_DIR} "
+        f"exists={KOREAN_FONT_DIAG['bundle_dir_exists']} "
+        f"contents={KOREAN_FONT_DIAG['bundle_dir_contents']} "
+        f"errors={KOREAN_FONT_DIAG['errors']}"
+    )
 
 QR_AVAILABLE = True
 try:

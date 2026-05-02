@@ -16,6 +16,17 @@ def ui_header(con: Client):
     is_admin = st.session_state.get("IS_ADMIN", False)
     project_id = st.session_state.get("PROJECT_ID", "")
     today = date.today().isoformat()
+
+    # 한글 폰트 등록 진단 — 관리자에게만 노출
+    if is_admin:
+        try:
+            from modules.outputs.pdf import KOREAN_FONT_REGISTERED, KOREAN_FONT_DIAG
+            if not KOREAN_FONT_REGISTERED:
+                with st.expander("⚠️ 한글 폰트 미등록 — PDF 산출물이 □로 깨질 수 있습니다", expanded=False):
+                    st.json(KOREAN_FONT_DIAG)
+                    st.caption("modules/outputs/fonts/NanumGothic.ttf 존재 여부 / Streamlit Cloud 재배포 확인")
+        except Exception:
+            pass
     res = (con.table("requests").select("status,vehicle_count")
            .eq("project_id", project_id).eq("date", today).execute())
     rows = res.data or []

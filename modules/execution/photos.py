@@ -41,41 +41,98 @@ def _camera_facing_toggle(rid: str) -> str:
         st.session_state[key] = next_facing
         st.rerun()
 
+    st.caption(
+        "💡 PC 노트북은 보통 웹캠 1개라 전환 효과가 없습니다. "
+        "모바일/태블릿(전후면 카메라 보유)에서 사용하세요."
+    )
     return facing
 
 
 def _inject_camera_facing_js(facing: str) -> None:
-    """st.camera_input의 활성 video 트랙에 facingMode를 적용 (best-effort).
+    """st.camera_input의 카메라 facingMode를 강제 적용.
 
-    Streamlit Cloud의 same-origin iframe에서는 동작; 일부 sandbox 환경에서는
-    조용히 실패할 수 있음. 그 경우 OS 카메라 UI의 전환 버튼으로 사용자가 직접 선택.
+    3중 전략 (위에서부터 순차):
+      1. parent window의 navigator.mediaDevices.getUserMedia를 monkey-patch
+         → Streamlit이 다음 번 getUserMedia를 호출할 때 facingMode가 자동 주입
+      2. 활성 video 트랙들을 stop() → Streamlit이 새로 getUserMedia 호출하도록 유도
+      3. 활성 트랙에 applyConstraints({facingMode}) — fallback
+
+    PC 노트북(웹캠 1개)에서는 효과가 없을 수 있음 — 모바일/태블릿에서 검증 필요.
+    브라우저 DevTools 콘솔에 "[camera-toggle]" 로그가 나옴.
     """
     components.html(f"""
 <script>
 (function() {{
   const target = "{facing}";
-  function tryApply() {{
+  const tag = "[camera-toggle]";
+
+  function patchGetUserMedia(win) {{
     try {{
-      const doc = window.parent.document;
-      const videos = doc.querySelectorAll('[data-testid="stCameraInput"] video');
+      const md = win.navigator && win.navigator.mediaDevices;
+      if (!md || !md.getUserMedia) {{ console.warn(tag, "no mediaDevices"); return false; }}
+      if (!md.__origGetUserMedia) {{
+        md.__origGetUserMedia = md.getUserMedia.bind(md);
+        console.log(tag, "monkey-patched getUserMedia");
+      }}
+      md.getUserMedia = function(constraints) {{
+        try {{
+          constraints = constraints || {{}};
+          if (constraints.video === undefined) constraints.video = true;
+          if (constraints.video === true)     constraints.video = {{}};
+          if (typeof constraints.video === 'object') {{
+            constraints.video.facingMode = {{ ideal: window.__camTargetFacing || target }};
+          }}
+          console.log(tag, "getUserMedia →", JSON.stringify(constraints));
+        }} catch(e) {{ console.warn(tag, "patch err", e); }}
+        return md.__origGetUserMedia(constraints);
+      }};
+      win.__camTargetFacing = target;
+      return true;
+    }} catch(e) {{ console.warn(tag, "patch failed", e); return false; }}
+  }}
+
+  function stopTracks(win) {{
+    try {{
+      const videos = win.document.querySelectorAll('[data-testid="stCameraInput"] video');
+      let count = 0;
       videos.forEach(v => {{
         if (v.srcObject && v.srcObject.getTracks) {{
           v.srcObject.getTracks().forEach(t => {{
-            if (t.kind !== 'video') return;
-            const cur = (t.getSettings && t.getSettings().facingMode) || null;
-            if (cur && cur === target) return;
-            if (t.applyConstraints) {{
-              t.applyConstraints({{ facingMode: {{ ideal: target }} }})
-                .catch(() => {{ /* unsupported on this device — silent */ }});
-            }}
+            try {{ t.stop(); count++; }} catch(_){{}}
           }});
         }}
       }});
-    }} catch (e) {{ /* sandbox/cross-origin — silent */ }}
+      if (count > 0) console.log(tag, "stopped", count, "tracks");
+      return count;
+    }} catch(e) {{ console.warn(tag, "stopTracks err", e); return 0; }}
   }}
-  tryApply();
-  setTimeout(tryApply, 400);
-  setTimeout(tryApply, 1200);
+
+  function applyToActive(win) {{
+    try {{
+      const videos = win.document.querySelectorAll('[data-testid="stCameraInput"] video');
+      videos.forEach(v => {{
+        if (v.srcObject && v.srcObject.getTracks) {{
+          v.srcObject.getTracks().forEach(t => {{
+            if (t.kind !== 'video' || !t.applyConstraints) return;
+            t.applyConstraints({{ facingMode: {{ ideal: target }} }})
+              .then(() => console.log(tag, "applyConstraints OK →", target))
+              .catch(e => console.warn(tag, "applyConstraints failed", e));
+          }});
+        }}
+      }});
+    }} catch(e) {{ console.warn(tag, "apply err", e); }}
+  }}
+
+  // Strategy 1: patch parent's getUserMedia
+  const win = window.parent;
+  const patched = patchGetUserMedia(win);
+
+  // Strategy 2: stop existing tracks → Streamlit re-requests with new (patched) constraints
+  setTimeout(() => stopTracks(win), 50);
+
+  // Strategy 3: also try applyConstraints on whatever's active (covers existing stream)
+  setTimeout(() => applyToActive(win), 800);
+  setTimeout(() => applyToActive(win), 2000);
 }})();
 </script>
 """, height=0)

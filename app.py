@@ -31,6 +31,7 @@ from modules.admin.page import page_admin
 from modules.schedule.page import page_schedule
 from modules.profile.page import page_profile
 from modules.dashboard.page import page_dashboard
+from shared.timing import clear_timings, render_panel, measure
 
 
 # ── Page router ──
@@ -244,6 +245,9 @@ def page_home(con):
 
 def main():
     """Main application entry point."""
+    # ── DEBUG_TIMING: reset per-rerun timers (no-op when disabled) ──
+    clear_timings()
+
     # ── DB init (Supabase: schema is managed via Supabase CLI / SQL migrations) ──
     con = con_open()
 
@@ -267,11 +271,13 @@ def main():
             st.session_state["PROJECT_NAME"] = projects[0]["name"]
         else:
             page_project_select(con)
+            render_panel()
             return
 
     # ── Step 2: Authentication ──
     if not session_is_authed():
         page_login(con)
+        render_panel()
         return
 
     # ── Step 3: Main app ──
@@ -286,6 +292,9 @@ def main():
         PAGE_ROUTER[active_page](con)
     else:
         st.warning(f"알 수 없는 페이지: {active_page}")
+
+    # ── DEBUG_TIMING: show summary in sidebar (no-op when disabled) ──
+    render_panel()
 
 
 if __name__ == "__main__":

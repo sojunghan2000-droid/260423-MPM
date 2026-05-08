@@ -1,5 +1,6 @@
 """Approval CRUD operations."""
 
+from shared.timing import measure
 import json
 import uuid
 from typing import Dict, Any, List, Optional, Tuple
@@ -29,6 +30,9 @@ def approvals_create_default(con: Client, rid: str, kind: str) -> None:
     ]
     if rows:
         con.table("approvals").insert(rows).execute()
+
+
+@measure("crud.approvals_inbox")
 
 
 def approvals_inbox(
@@ -77,11 +81,17 @@ def approvals_inbox(
         return out
 
 
+@measure("crud.approvals_for_req")
+
+
 def approvals_for_req(con: Client, rid: str) -> List[Dict[str, Any]]:
     """Get all approval steps for a given request."""
     res = (con.table("approvals").select("*").eq("req_id", rid)
            .order("step_no").execute())
     return res.data or []
+
+
+@measure("crud.approval_mark")
 
 
 def approval_mark(

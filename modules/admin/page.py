@@ -3,12 +3,16 @@
 import json
 
 import streamlit as st
+from shared.timing import measure
 from supabase import Client
 
 from config import DEFAULT_SITE_NAME, DEFAULT_SITE_PIN, DEFAULT_ADMIN_PIN, ROLES
 from db.models import settings_get, settings_set
 from modules.approval.crud import routing_get
 from modules.admin.module_manager import render_module_manager
+
+
+@measure("page.admin")
 
 
 def page_admin(con: Client):

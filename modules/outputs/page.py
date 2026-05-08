@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import streamlit as st
+from shared.timing import measure
 from supabase import Client
 
 from datetime import date
@@ -23,6 +24,9 @@ def _resolve_local(con: Client, value: str) -> Path | None:
     if p.exists() and p.stat().st_size > 0:
         return p
     return cache_to_local(con, outputs_bucket(), value)
+
+
+@measure("page.outputs")
 
 
 def page_outputs(con: Client):

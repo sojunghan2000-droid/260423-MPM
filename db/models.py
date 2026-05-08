@@ -1,4 +1,5 @@
 """CRUD for projects, project_modules, settings (Supabase)."""
+from shared.timing import measure
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -8,6 +9,8 @@ from shared.helpers import now_str
 
 
 # ── Settings ──────────────────────────────────────────────────────────
+
+@measure("models.settings_get")
 
 def settings_get(sb: Client, key: str, default: str = "") -> str:
     res = sb.table("settings").select("value").eq("key", key).limit(1).execute()
@@ -34,9 +37,15 @@ def project_create(sb: Client, name: str, description: str,
     return pid
 
 
+@measure("models.project_list")
+
+
 def project_list(sb: Client) -> List[Dict[str, Any]]:
     res = sb.table("projects").select("*").order("created_at", desc=True).execute()
     return res.data or []
+
+
+@measure("models.project_get")
 
 
 def project_get(sb: Client, project_id: str) -> Optional[Dict[str, Any]]:
@@ -72,6 +81,9 @@ def modules_init_for_project(sb: Client, project_id: str) -> None:
         for key, name, desc, enabled, order in DEFAULT_MODULES
     ]
     sb.table("project_modules").upsert(rows, on_conflict="project_id,module_key").execute()
+
+
+@measure("models.modules_for_project")
 
 
 def modules_for_project(sb: Client, project_id: str) -> List[Dict[str, Any]]:

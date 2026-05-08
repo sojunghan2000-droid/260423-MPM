@@ -1,10 +1,14 @@
 """내 정보 수정 페이지."""
 import streamlit as st
+from shared.timing import measure
 from supabase import Client
 
 from shared.helpers import now_str
 from auth.session import _hash_pw, _new_salt
 from config import ROLES
+
+
+@measure("page.profile")
 
 
 def page_profile(con: Client):

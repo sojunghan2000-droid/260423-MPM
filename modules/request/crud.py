@@ -3,6 +3,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import streamlit as st
+from shared.timing import measure
 from supabase import Client
 
 from shared.helpers import now_str
@@ -39,6 +40,9 @@ def _compute_day_seq(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return rows
 
 
+@measure("crud.req_insert")
+
+
 def req_insert(con: Client, data: Dict[str, Any]) -> str:
     rid = uuid.uuid4().hex
     row = {
@@ -51,6 +55,9 @@ def req_insert(con: Client, data: Dict[str, Any]) -> str:
     }
     con.table("requests").insert(row).execute()
     return rid
+
+
+@measure("crud.req_get")
 
 
 def req_get(con: Client, rid: str) -> Optional[Dict[str, Any]]:
@@ -70,6 +77,9 @@ def req_get(con: Client, rid: str) -> Optional[Dict[str, Any]]:
         (r["day_seq"] for r in (same_day.data or []) if r["id"] == rid), 0
     )
     return target
+
+
+@measure("crud.req_list")
 
 
 def req_list(con: Client,
@@ -100,6 +110,9 @@ def req_update_time(con: Client, rid: str, time_from: str, time_to: str) -> None
     con.table("requests").update({
         "time_from": time_from, "time_to": time_to, "updated_at": now_str(),
     }).eq("id", rid).execute()
+
+
+@measure("crud.req_delete")
 
 
 def req_delete(con: Client, rid: str) -> None:

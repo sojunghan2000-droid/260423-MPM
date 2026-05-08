@@ -2,6 +2,7 @@
 import json
 import uuid
 import streamlit as st
+from shared.timing import measure
 from datetime import date, timedelta
 
 from modules.schedule.crud import schedule_list_by_date, schedule_sync_from_requests, schedule_insert
@@ -206,6 +207,9 @@ def _terminal_status_dialog(terminal: str, in_n: int, is_freed: bool,
         if st.button("닫기", use_container_width=True):
             st.session_state.pop("_term_dlg_trigger", None)
             st.rerun()
+
+
+@measure("page.schedule")
 
 
 def page_schedule(con):

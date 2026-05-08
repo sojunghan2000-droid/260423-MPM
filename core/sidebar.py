@@ -1,6 +1,10 @@
 """Sidebar rendering."""
 import streamlit as st
+from shared.timing import measure
 from auth.session import auth_reset
+
+
+@measure("core.render_sidebar")
 
 
 def render_sidebar():

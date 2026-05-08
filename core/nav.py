@@ -1,5 +1,6 @@
 """Top navigation bar — dynamically built from enabled modules."""
 import streamlit as st
+from shared.timing import measure
 from db.models import modules_enabled_for_project
 from auth.session import current_project_id
 
@@ -28,6 +29,9 @@ MODULE_DISPLAY_LABELS = {
     "dashboard": "대시\n보드",
     "execution": "사진\n등록",
 }
+
+
+@measure("core.render_topnav")
 
 
 def render_topnav(con):

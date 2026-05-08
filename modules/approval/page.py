@@ -3,6 +3,7 @@
 from datetime import date as _date
 
 import streamlit as st
+from shared.timing import measure
 from supabase import Client
 
 from modules.approval.crud import approvals_inbox, approval_mark
@@ -44,6 +45,9 @@ def _pending_my_requests(con: Client, project_id: str, user_name: str):
             "step_no": ap.get("step_no"),
         })
     return out
+
+
+@measure("page.approval")
 
 
 def page_approval(con: Client):

@@ -1,5 +1,6 @@
 """Execution CRUD operations."""
 
+from shared.timing import measure
 import json
 import uuid
 from pathlib import Path
@@ -71,6 +72,9 @@ def photo_delete_slot(con: Client, rid: str, slot_key: str) -> None:
     con.table("photos").delete().eq("req_id", rid).eq("slot_key", slot_key).execute()
 
 
+@measure("crud.photos_for_req")
+
+
 def photos_for_req(con: Client, rid: str) -> List[Dict[str, Any]]:
     """Get all photos for a given request."""
     res = (con.table("photos").select("*").eq("req_id", rid)
@@ -103,6 +107,9 @@ def execution_upsert(
         "required_photo_ok": ok,
         "notes": notes,
     }, on_conflict="req_id").execute()
+
+
+@measure("crud.execution_get")
 
 
 def execution_get(con: Client, rid: str) -> Optional[Dict[str, Any]]:

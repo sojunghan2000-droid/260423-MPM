@@ -1,6 +1,7 @@
 """Execution registration page."""
 
 import streamlit as st
+from shared.timing import measure
 from supabase import Client
 
 from datetime import date
@@ -27,6 +28,9 @@ def _do_confirm(con, rid: str, reedit_key: str):
     st.session_state.pop(reedit_key, None)
     st.toast("확인 등록 완료!", icon="✅")
     st.rerun()
+
+
+@measure("page.execute")
 
 
 def page_execute(con: Client):

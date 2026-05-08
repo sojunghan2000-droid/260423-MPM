@@ -2,6 +2,10 @@
 import streamlit as st
 
 
+from shared.timing import measure
+@measure("core.inject_css")
+
+
 def inject_css():
     """Inject all global CSS styles."""
     st.markdown("""

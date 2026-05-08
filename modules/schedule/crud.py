@@ -1,9 +1,13 @@
 """Schedule CRUD operations."""
+from shared.timing import measure
 from typing import List, Dict, Any, Optional
 
 from supabase import Client
 
 from shared.helpers import now_str, new_id
+
+
+@measure("crud.schedule_insert")
 
 
 def schedule_insert(con: Client, project_id, data: dict) -> str:
@@ -61,10 +65,16 @@ def schedule_delete(con: Client, sid):
     con.table("schedules").delete().eq("id", sid).execute()
 
 
+@measure("crud.schedule_get")
+
+
 def schedule_get(con: Client, sid) -> Optional[Dict[str, Any]]:
     """Get a single schedule entry by id."""
     res = con.table("schedules").select("*").eq("id", sid).limit(1).execute()
     return res.data[0] if res.data else None
+
+
+@measure("crud.schedule_by_req_id")
 
 
 def schedule_by_req_id(con: Client, req_id: str) -> Optional[Dict[str, Any]]:

@@ -5,8 +5,10 @@ from supabase import Client
 
 from config import APP_VERSION, DEFAULT_SITE_NAME
 from db.models import settings_get
+from shared.timing import measure
 
 
+@measure("core.ui_header")
 def ui_header(con: Client):
     """Render hero header with KPI stats."""
     # 프로젝트명 우선, 없으면 settings의 site_name 사용

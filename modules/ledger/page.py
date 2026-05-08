@@ -3,6 +3,7 @@
 import json
 
 import streamlit as st
+from shared.timing import measure
 from supabase import Client
 
 from config import KIND_IN, REQ_STATUS
@@ -17,6 +18,9 @@ _STATUS_BADGE = {
     "EXECUTING": "🔨 실행중",
     "DONE": "✔️ 등록완료",
 }
+
+
+@measure("page.ledger")
 
 
 def page_ledger(con: Client):

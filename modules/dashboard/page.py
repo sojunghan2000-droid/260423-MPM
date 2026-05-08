@@ -2,6 +2,7 @@
 import io
 from datetime import date, timedelta
 import streamlit as st
+from shared.timing import measure
 from supabase import Client
 from config import KIND_IN, KIND_OUT
 from db.models import settings_get
@@ -324,6 +325,9 @@ def _req_list_for_date(con: Client, project_id: str, target_date: str):
            .order("booking_zone").order("time_from").order("created_at")
            .execute())
     return res.data or []
+
+
+@measure("page.dashboard")
 
 
 def page_dashboard(con: Client):

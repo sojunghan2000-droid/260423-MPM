@@ -319,7 +319,16 @@ def _inject_eruda():
             s.onload = function() {
               try {
                 pwin.eruda.init();
-                console.log('[eruda] mobile DevTools ready — tap the gear button');
+                // 초기 위치를 좌하단으로 (기본은 우하단)
+                const setPos = () => {
+                  try {
+                    const w = pwin.innerWidth, h = pwin.innerHeight;
+                    pwin.eruda.position({ x: 10, y: h - 60 });
+                  } catch (_e) { /* 일부 버전에서 position 미지원 */ }
+                };
+                setPos();
+                pwin.addEventListener('resize', setPos);
+                console.log('[eruda] mobile DevTools ready — tap the gear button (bottom-left)');
               } catch (e) {
                 console.warn('[eruda] init failed:', e);
               }

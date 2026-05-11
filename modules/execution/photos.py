@@ -236,8 +236,12 @@ def ui_photo_upload(con: Client, rid: str):
                 "카메라로 촬영",
                 key=f"photo_camera_{rid}_{count}_{facing}",
             )
-            # active video track에 facingMode 적용 (best-effort)
-            _inject_camera_facing_js(facing)
+            # facingMode JS 주입은 facing이 *실제로 바뀔 때만* 1회.
+            # 매 rerun마다 stopTracks를 호출하면 카메라가 ON↔OFF 무한 깜빡임.
+            _last_applied_key = f"cam_facing_last_applied_{rid}"
+            if st.session_state.get(_last_applied_key) != facing:
+                _inject_camera_facing_js(facing)
+                st.session_state[_last_applied_key] = facing
             if pic:
                 data = bytes_from_camera_or_upload(pic)
                 if data:

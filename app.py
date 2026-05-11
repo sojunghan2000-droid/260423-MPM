@@ -155,11 +155,13 @@ def page_home(con):
                 } catch (_e) {
                   console.log(TAG, "Permissions API unsupported, fallback to getUserMedia");
                 }
-                // 2) granted가 아니면 명시적으로 요청
+                // 2) granted가 아니면 명시적으로 요청 — 후면 카메라 힌트 포함
                 if (state !== "granted") {
-                  const stream = await navigator.mediaDevices.getUserMedia({video: true});
+                  const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: 'environment' } }
+                  });
                   stream.getTracks().forEach(t => t.stop());  // 즉시 닫음
-                  console.log(TAG, "permission granted via getUserMedia");
+                  console.log(TAG, "permission granted via getUserMedia (rear hint)");
                 } else {
                   console.log(TAG, "already granted, no prompt needed");
                 }
@@ -337,21 +339,25 @@ def _inject_eruda():
 
 
 def _inject_camera_default_environment():
-    """Default getUserMedia facingMode to 'environment' (rear camera) once per session.
+    """Force getUserMedia facingMode to 'environment' (rear camera).
 
-    Patches navigator.mediaDevices.getUserMedia in the parent window so that
-    when a caller (e.g., Streamlit's st.camera_input) does NOT specify
-    facingMode, we add an *ideal* hint of 'environment'. If facingMode is
-    already specified, we leave the constraints untouched.
+    Two-pronged strategy applied once per session:
 
-    Key differences from the earlier (removed) facing-toggle hack:
-      - Runs ONCE per session (guarded by __cam_default_set in session_state
-        AND __camDefaulted on the parent window) — no per-rerun disruption.
-      - Non-destructive: only fills in a missing default, never overrides.
-      - Does NOT call stopTracks() — never interrupts an active stream.
-      - Falls back gracefully: 'ideal' is a hint, not a hard requirement, so
-        devices without a rear camera still work (browser picks what is
-        available).
+      1) Monkey-patch ``window.parent.navigator.mediaDevices.getUserMedia`` so
+         that EVERY video request — regardless of what facingMode the caller
+         specified — is rewritten to use ``{ideal: 'environment'}``. ``ideal``
+         (not ``exact``) lets the browser fall back to the front camera on
+         devices without a rear one — no NotFoundError.
+
+      2) Pre-warm: if the camera permission is already granted, call
+         ``getUserMedia({video: {facingMode: {ideal: 'environment'}}})`` once
+         and immediately stop the stream. Browsers tend to remember the
+         last-used camera for the origin, so this nudges st.camera_input
+         toward rear even on devices where (1) somehow doesn't reach its
+         execution context (defensive).
+
+    Skipped when permission state is not 'granted' to avoid stealing the
+    permission dialog from the page_home pre-request flow.
     """
     if st.session_state.get("__cam_default_set"):
         return
@@ -360,34 +366,59 @@ def _inject_camera_default_environment():
     _components.html(
         """
         <script>
-        (function() {
+        (async function() {
+          const TAG = "[cam-default]";
           try {
             const pwin = window.parent;
             if (pwin.__camDefaulted) return;
             pwin.__camDefaulted = true;
             const md = pwin.navigator && pwin.navigator.mediaDevices;
             if (!md || !md.getUserMedia) {
-              console.warn('[cam-default] mediaDevices unavailable');
+              console.warn(TAG, "mediaDevices unavailable");
               return;
             }
+
+            // 1) Monkey-patch — always force 'environment' (rear)
             if (!md.__origGUM) md.__origGUM = md.getUserMedia.bind(md);
             md.getUserMedia = function(constraints) {
               try {
                 constraints = constraints || {};
                 if (constraints.video === undefined) constraints.video = true;
                 if (constraints.video === true) constraints.video = {};
-                if (typeof constraints.video === 'object' && !constraints.video.facingMode) {
+                if (typeof constraints.video === 'object') {
+                  // Always force rear. 'ideal' (not 'exact') keeps single-camera
+                  // devices working — browser falls back to front automatically.
                   constraints.video.facingMode = { ideal: 'environment' };
-                  console.log('[cam-default] injected facingMode=environment (default)');
                 }
-              } catch (e) {
-                console.warn('[cam-default] patch err:', e);
-              }
+                console.log(TAG, "gUM →", JSON.stringify(constraints));
+              } catch (e) { console.warn(TAG, "patch err:", e); }
               return md.__origGUM(constraints);
             };
-            console.log('[cam-default] monkey-patched getUserMedia (session)');
+            console.log(TAG, "monkey-patched getUserMedia (force environment)");
+
+            // 2) Pre-warm — only if permission is already granted (avoid
+            //    competing with the page_home permission pre-request)
+            let state = "unknown";
+            try {
+              const res = await pwin.navigator.permissions.query({name: 'camera'});
+              state = res.state;
+            } catch (_e) { /* Permissions API may not support 'camera' on some browsers */ }
+            if (state === "granted") {
+              try {
+                const stream = await pwin.navigator.mediaDevices.getUserMedia({
+                  video: { facingMode: { ideal: 'environment' } }
+                });
+                stream.getTracks().forEach(t => t.stop());
+                console.log(TAG, "pre-warmed rear camera");
+              } catch (e) {
+                console.warn(TAG, "pre-warm failed:",
+                             (e && (e.name + ": " + e.message)) || e);
+              }
+            } else {
+              console.log(TAG, "skipping pre-warm (perm state:", state, ")");
+            }
           } catch (e) {
-            console.warn('[cam-default] inject failed:', e);
+            console.warn(TAG, "inject failed:", e);
           }
         })();
         </script>

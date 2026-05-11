@@ -336,6 +336,66 @@ def _inject_eruda():
     )
 
 
+def _inject_camera_default_environment():
+    """Default getUserMedia facingMode to 'environment' (rear camera) once per session.
+
+    Patches navigator.mediaDevices.getUserMedia in the parent window so that
+    when a caller (e.g., Streamlit's st.camera_input) does NOT specify
+    facingMode, we add an *ideal* hint of 'environment'. If facingMode is
+    already specified, we leave the constraints untouched.
+
+    Key differences from the earlier (removed) facing-toggle hack:
+      - Runs ONCE per session (guarded by __cam_default_set in session_state
+        AND __camDefaulted on the parent window) — no per-rerun disruption.
+      - Non-destructive: only fills in a missing default, never overrides.
+      - Does NOT call stopTracks() — never interrupts an active stream.
+      - Falls back gracefully: 'ideal' is a hint, not a hard requirement, so
+        devices without a rear camera still work (browser picks what is
+        available).
+    """
+    if st.session_state.get("__cam_default_set"):
+        return
+    st.session_state["__cam_default_set"] = True
+    import streamlit.components.v1 as _components  # deprecation handled in separate task
+    _components.html(
+        """
+        <script>
+        (function() {
+          try {
+            const pwin = window.parent;
+            if (pwin.__camDefaulted) return;
+            pwin.__camDefaulted = true;
+            const md = pwin.navigator && pwin.navigator.mediaDevices;
+            if (!md || !md.getUserMedia) {
+              console.warn('[cam-default] mediaDevices unavailable');
+              return;
+            }
+            if (!md.__origGUM) md.__origGUM = md.getUserMedia.bind(md);
+            md.getUserMedia = function(constraints) {
+              try {
+                constraints = constraints || {};
+                if (constraints.video === undefined) constraints.video = true;
+                if (constraints.video === true) constraints.video = {};
+                if (typeof constraints.video === 'object' && !constraints.video.facingMode) {
+                  constraints.video.facingMode = { ideal: 'environment' };
+                  console.log('[cam-default] injected facingMode=environment (default)');
+                }
+              } catch (e) {
+                console.warn('[cam-default] patch err:', e);
+              }
+              return md.__origGUM(constraints);
+            };
+            console.log('[cam-default] monkey-patched getUserMedia (session)');
+          } catch (e) {
+            console.warn('[cam-default] inject failed:', e);
+          }
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
 def main():
     """Main application entry point."""
     # ── DEBUG_TIMING: reset per-rerun timers (no-op when disabled) ──
@@ -343,6 +403,9 @@ def main():
 
     # ── DEBUG_TIMING: inject Eruda mobile DevTools (no-op when disabled) ──
     _inject_eruda()
+
+    # ── Camera default: prefer rear (environment) facing for st.camera_input ──
+    _inject_camera_default_environment()
 
     # ── DB init (Supabase: schema is managed via Supabase CLI / SQL migrations) ──
     con = con_open()

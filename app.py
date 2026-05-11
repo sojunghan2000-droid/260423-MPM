@@ -129,6 +129,50 @@ def page_home(con):
     }
     </style>
     """, unsafe_allow_html=True)
+
+    # ── 카메라 권한 사전 허용 (세션당 1회 자동 트리거) ──────────────────
+    # 로그인 후 홈 첫 진입 시 안내 메시지를 보여주고 1초 후 자동으로
+    # getUserMedia 호출 → 브라우저 권한 다이얼로그. 이후 사진등록 페이지에서는
+    # 추가 다이얼로그 없이 즉시 카메라 활성화 (HTTPS·localhost 환경에서 권한 영구 저장).
+    if not st.session_state.get("camera_perm_requested", False):
+        import streamlit.components.v1 as _components  # deprecation 처리 별도 task
+        st.info(
+            "ℹ️ 곧 카메라 권한을 요청합니다 — 자재 사진 촬영용입니다. "
+            "브라우저 다이얼로그에서 **'허용'** 을 선택하세요."
+        )
+        _components.html(
+            """
+            <script>
+            setTimeout(async () => {
+              const TAG = "[camera-perm]";
+              try {
+                // 1) Permissions API로 현재 상태 우선 확인
+                let state = "prompt";
+                try {
+                  const res = await navigator.permissions.query({name: 'camera'});
+                  state = res.state;
+                  console.log(TAG, "current state:", state);
+                } catch (_e) {
+                  console.log(TAG, "Permissions API unsupported, fallback to getUserMedia");
+                }
+                // 2) granted가 아니면 명시적으로 요청
+                if (state !== "granted") {
+                  const stream = await navigator.mediaDevices.getUserMedia({video: true});
+                  stream.getTracks().forEach(t => t.stop());  // 즉시 닫음
+                  console.log(TAG, "permission granted via getUserMedia");
+                } else {
+                  console.log(TAG, "already granted, no prompt needed");
+                }
+              } catch (e) {
+                console.warn(TAG, "denied or unavailable:", e && e.name, e && e.message);
+              }
+            }, 1000);  // 1초 후 — 안내 메시지가 렌더링되어 보일 시간 확보
+            </script>
+            """,
+            height=0,
+        )
+        st.session_state["camera_perm_requested"] = True
+
     inbox = approvals_inbox(con, role, st.session_state.get("IS_ADMIN", False))
     st.markdown(f"""
     <div class="card">

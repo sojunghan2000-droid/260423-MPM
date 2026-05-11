@@ -17,7 +17,7 @@ _DASH_CSS = """
   align-items: center !important;
   flex-wrap: nowrap !important;
 }
-/* 버튼 컬럼: 고정 최소폭 */
+/* 버튼 컬럼(◀◀ ◀ ▶ ▶▶): 고정 최소폭 */
 .st-key-dash_nav .stHorizontalBlock > div:nth-child(1),
 .st-key-dash_nav .stHorizontalBlock > div:nth-child(2),
 .st-key-dash_nav .stHorizontalBlock > div:nth-child(4),
@@ -25,6 +25,12 @@ _DASH_CSS = """
   flex: 0 0 40px !important;
   min-width: 40px !important;
   max-width: 40px !important;
+}
+/* 6번째 컬럼(오늘 버튼): 살짝 넓게 — 한글 두 글자 표시 */
+.st-key-dash_nav .stHorizontalBlock > div:nth-child(6) {
+  flex: 0 0 56px !important;
+  min-width: 56px !important;
+  max-width: 56px !important;
 }
 /* 날짜 박스 컬럼: 남은 공간 차지 */
 .st-key-dash_nav .stHorizontalBlock > div:nth-child(3) {
@@ -336,37 +342,54 @@ def page_dashboard(con: Client):
     project_id = st.session_state.get("PROJECT_ID", "")
     site_name  = settings_get(con, "site_name", "현장명")
 
-    # ── 날짜 상태 ─────────────────────────────────────────────────────────
-    if "dash_date" not in st.session_state:
-        st.session_state["dash_date"] = date.today()
-    cur_date: date = st.session_state["dash_date"]
+    # ── 날짜 상태 (단일 소스 — date_input의 widget state) ───────────────────
+    # Streamlit 함정: st.date_input은 key가 있으면 widget state가 value보다 우선.
+    # 이전 구현은 별도 'dash_date' 변수와 widget state를 병행 운영 → sync 깨짐.
+    # 수정: dash_date_picker 단일 source of truth로 통일하고, nav 버튼이
+    # 같은 key를 직접 갱신하도록 변경.
+    if "dash_date_picker" not in st.session_state:
+        st.session_state["dash_date_picker"] = date.today()
+    cur_date: date = st.session_state["dash_date_picker"]
+    today: date = date.today()
 
     # ── 날짜 네비게이션 ───────────────────────────────────────────────────
     with st.container(key="dash_nav"):
-        nc1, nc2, nc3, nc4, nc5 = st.columns([1, 1, 3, 1, 1])
+        # 6 columns: ◀◀ ◀ [date_input] ▶ ▶▶ [오늘]
+        nc1, nc2, nc3, nc4, nc5, nc6 = st.columns([1, 1, 2.6, 1, 1, 1])
         with nc1:
             if st.button("◀◀", key="dash_prev_week", use_container_width=True, help="일주일 전"):
-                st.session_state["dash_date"] = cur_date - timedelta(days=7)
+                st.session_state["dash_date_picker"] = cur_date - timedelta(days=7)
                 st.rerun()
         with nc2:
             if st.button("◀", key="dash_prev_day", use_container_width=True, help="전날"):
-                st.session_state["dash_date"] = cur_date - timedelta(days=1)
+                st.session_state["dash_date_picker"] = cur_date - timedelta(days=1)
                 st.rerun()
         with nc3:
-            picked = st.date_input(
-                "날짜", value=cur_date, key="dash_date_picker",
+            # value= 제거: widget state(dash_date_picker)가 단독 소스.
+            # 캘린더에서 직접 선택 시 자동으로 widget state 갱신 → 다음 rerun에서 cur_date 반영.
+            st.date_input(
+                "날짜", key="dash_date_picker",
                 label_visibility="collapsed",
             )
-            if picked != cur_date:
-                st.session_state["dash_date"] = picked
-                st.rerun()
         with nc4:
             if st.button("▶", key="dash_next_day", use_container_width=True, help="다음날"):
-                st.session_state["dash_date"] = cur_date + timedelta(days=1)
+                st.session_state["dash_date_picker"] = cur_date + timedelta(days=1)
                 st.rerun()
         with nc5:
             if st.button("▶▶", key="dash_next_week", use_container_width=True, help="일주일 후"):
-                st.session_state["dash_date"] = cur_date + timedelta(days=7)
+                st.session_state["dash_date_picker"] = cur_date + timedelta(days=7)
+                st.rerun()
+        with nc6:
+            is_today = (cur_date == today)
+            if st.button(
+                "오늘",
+                key="dash_today" if not is_today else "dash_today_disabled",
+                use_container_width=True,
+                type="primary" if not is_today else "secondary",
+                disabled=is_today,
+                help="이미 오늘입니다" if is_today else "오늘로 이동",
+            ):
+                st.session_state["dash_date_picker"] = today
                 st.rerun()
 
     # ── 데이터 로드 ───────────────────────────────────────────────────────

@@ -287,10 +287,62 @@ def page_home(con):
                         st.rerun()
 
 
+def _inject_eruda():
+    """Mobile in-app DevTools (Eruda) — only when DEBUG_TIMING=true.
+
+    Eruda adds a floating gear button to the page that opens a DevTools-like
+    panel (Console / Elements / Network / ...). On mobile devices where F12 is
+    unavailable, this is the easiest way to read `[camera-perm]` /
+    `[camera-toggle]` and similar console logs.
+
+    Injected via a one-shot script in the parent window (not in the iframe
+    sandbox) so it can inspect the real Streamlit app DOM.
+    """
+    if str(st.secrets.get("DEBUG_TIMING", "false")).lower() not in ("true", "1", "yes"):
+        return
+    if st.session_state.get("__eruda_injected"):
+        return
+    st.session_state["__eruda_injected"] = True
+    import streamlit.components.v1 as _components  # deprecation handled in separate task
+    _components.html(
+        """
+        <script>
+        (function() {
+          try {
+            const pwin = window.parent;
+            if (pwin.__eruda_loaded) return;
+            pwin.__eruda_loaded = true;
+            const s = pwin.document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/eruda';
+            s.onload = function() {
+              try {
+                pwin.eruda.init();
+                console.log('[eruda] mobile DevTools ready — tap the gear button');
+              } catch (e) {
+                console.warn('[eruda] init failed:', e);
+              }
+            };
+            s.onerror = function() {
+              console.warn('[eruda] failed to load script (CDN blocked?)');
+            };
+            pwin.document.head.appendChild(s);
+          } catch (e) {
+            console.warn('[eruda] inject failed:', e);
+          }
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
 def main():
     """Main application entry point."""
     # ── DEBUG_TIMING: reset per-rerun timers (no-op when disabled) ──
     clear_timings()
+
+    # ── DEBUG_TIMING: inject Eruda mobile DevTools (no-op when disabled) ──
+    _inject_eruda()
 
     # ── DB init (Supabase: schema is managed via Supabase CLI / SQL migrations) ──
     con = con_open()

@@ -278,3 +278,176 @@ def page_admin(con: Client):
         render_module_manager(con, project_id)
     else:
         st.caption("프로젝트를 선택하면 모듈 설정을 관리할 수 있습니다.")
+
+    st.markdown("---")
+
+    # ── 사용자 관리 — 비밀번호 재설정 ─────────────────────────────────────
+    #
+    # 사용자가 비밀번호를 분실했을 때 관리자가 임시 비밀번호를 부여하기 위한 UI.
+    # · 보안: IS_ADMIN 권한자만 진입 (페이지 상단 가드)
+    # · 본인 비밀번호 변경은 [내정보] 페이지에서 현재 비밀번호 확인 후 변경
+    # · 임시 비밀번호는 안전하지 않을 수 있으므로 첫 로그인 후 변경 안내 필수
+    from auth.session import user_list, admin_reset_user_password
+
+    st.markdown("#### 👥 사용자 비밀번호 재설정")
+    st.caption("사용자가 비밀번호를 분실한 경우 임시 비밀번호를 부여합니다. "
+               "사용자에게 첫 로그인 후 [내정보]에서 즉시 변경하도록 안내하세요.")
+
+    my_username = st.session_state.get("USER_ID", "")
+    _users = user_list(con, project_id) if project_id else []
+
+    if not _users:
+        st.info("등록된 사용자가 없습니다.")
+    else:
+        # 검색
+        _q = st.text_input(
+            "🔍 사용자 검색", key="pwreset_search",
+            placeholder="아이디 또는 이름으로 필터",
+        ).strip().lower()
+        if _q:
+            _users = [
+                u for u in _users
+                if _q in (u.get("username") or "").lower()
+                or _q in (u.get("name") or "").lower()
+            ]
+
+        # CSS: 사용자 행 레이아웃
+        st.markdown("""<style>
+        [class*="st-key-pwreset_row_"] .stHorizontalBlock {
+            align-items: center !important;
+            flex-wrap: nowrap !important;
+            gap: 8px !important;
+            padding: 6px 0 !important;
+            border-bottom: 1px solid var(--border-light, #e2e8f0) !important;
+        }
+        [class*="st-key-pwreset_row_"] .stHorizontalBlock > [data-testid="stColumn"]:nth-child(1) {
+            flex: 1 1 0 !important; min-width: 0 !important;
+        }
+        [class*="st-key-pwreset_row_"] .stHorizontalBlock > [data-testid="stColumn"]:nth-child(2) {
+            flex: 0 0 88px !important; min-width: 88px !important; max-width: 88px !important;
+        }
+        [class*="st-key-pwreset_row_"] [data-testid="stElementContainer"] {
+            margin: 0 !important; padding: 0 !important;
+        }
+        [class*="st-key-pwreset_btn_"] button {
+            background-color: #2563eb !important;
+            border-color: #2563eb !important;
+            border-radius: 4px !important;
+            height: 32px !important; min-height: 32px !important;
+            padding: 0 8px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+        }
+        [class*="st-key-pwreset_btn_"] button:hover {
+            background-color: #1d4ed8 !important;
+            border-color: #1d4ed8 !important;
+        }
+        [class*="st-key-pwreset_btn_"] button,
+        [class*="st-key-pwreset_btn_"] button p,
+        [class*="st-key-pwreset_btn_"] button span {
+            color: #f8f8f8 !important;
+            font-size: 12px !important;
+            line-height: 1 !important;
+            margin: 0 !important;
+        }
+        [class*="st-key-pwreset_form_"] {
+            background: #fef3c7 !important;
+            border: 1px solid #fbbf24 !important;
+            border-radius: 6px !important;
+            padding: 12px !important;
+            margin: 8px 0 !important;
+        }
+        </style>""", unsafe_allow_html=True)
+
+        if not _users:
+            st.caption("검색 결과가 없습니다.")
+
+        for u in _users:
+            uid    = u["id"]
+            uname  = u.get("username") or "—"
+            nm     = u.get("name") or ""
+            urole  = u.get("role") or ""
+            badges = []
+            if u.get("is_admin"):
+                badges.append("🔐관리자")
+            if uname and uname == my_username:
+                badges.append("본인")
+            badge_txt = (" · " + " · ".join(badges)) if badges else ""
+
+            short = uid[:8]
+            with st.container(key=f"pwreset_row_{short}"):
+                lc, rc = st.columns([6, 1])
+                with lc:
+                    st.markdown(
+                        f"**{uname}** · {nm} ({urole}){badge_txt}"
+                    )
+                with rc:
+                    if st.button("재설정", key=f"pwreset_btn_{short}",
+                                 use_container_width=True):
+                        st.session_state["pwreset_target_id"]   = uid
+                        st.session_state["pwreset_target_name"] = f"{uname} ({nm})"
+                        # 이전 입력값 초기화
+                        for _k in list(st.session_state.keys()):
+                            if isinstance(_k, str) and (
+                                _k.startswith("pwreset_new1_")
+                                or _k.startswith("pwreset_new2_")
+                            ):
+                                st.session_state.pop(_k, None)
+                        st.rerun()
+
+            # 인라인 폼: 이 사용자가 선택된 경우에만 표시
+            if st.session_state.get("pwreset_target_id") == uid:
+                with st.container(key=f"pwreset_form_{short}"):
+                    st.markdown(
+                        f"⚠ **{uname} ({nm})** 의 비밀번호를 재설정합니다."
+                    )
+                    if uname == my_username:
+                        st.info(
+                            "본인 비밀번호는 [내정보] 페이지에서 "
+                            "현재 비밀번호 확인 후 변경하는 것을 권장합니다."
+                        )
+                    _np1 = st.text_input(
+                        "새 임시 비밀번호 (4자 이상) *",
+                        type="password",
+                        key=f"pwreset_new1_{short}",
+                        placeholder="임시 비밀번호 — 사용자에게 직접 전달",
+                    )
+                    _np2 = st.text_input(
+                        "새 비밀번호 확인 *",
+                        type="password",
+                        key=f"pwreset_new2_{short}",
+                    )
+                    ac1, ac2 = st.columns(2)
+                    with ac1:
+                        if st.button("✓ 재설정 실행",
+                                     key=f"pwreset_do_{short}",
+                                     type="primary",
+                                     use_container_width=True):
+                            if not _np1 or len(_np1) < 4:
+                                st.error("비밀번호는 4자 이상이어야 합니다.")
+                            elif _np1 != _np2:
+                                st.error("두 비밀번호가 일치하지 않습니다.")
+                            else:
+                                ok, msg = admin_reset_user_password(con, uid, _np1)
+                                if ok:
+                                    st.toast(
+                                        f"✅ {uname} 비밀번호 재설정 완료",
+                                        icon="🔐",
+                                    )
+                                    st.session_state.pop("pwreset_target_id", None)
+                                    st.session_state.pop("pwreset_target_name", None)
+                                    st.session_state.pop(f"pwreset_new1_{short}", None)
+                                    st.session_state.pop(f"pwreset_new2_{short}", None)
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+                    with ac2:
+                        if st.button("취소",
+                                     key=f"pwreset_cancel_{short}",
+                                     use_container_width=True):
+                            st.session_state.pop("pwreset_target_id", None)
+                            st.session_state.pop("pwreset_target_name", None)
+                            st.session_state.pop(f"pwreset_new1_{short}", None)
+                            st.session_state.pop(f"pwreset_new2_{short}", None)
+                            st.rerun()

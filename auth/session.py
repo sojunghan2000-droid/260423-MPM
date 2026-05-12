@@ -117,6 +117,28 @@ def user_delete(sb: Client, user_id: str) -> None:
     sb.table("profiles").delete().eq("id", user_id).execute()
 
 
+def admin_reset_user_password(sb: Client, user_id: str,
+                              new_password: str) -> Tuple[bool, str]:
+    """관리자용 — 다른 사용자의 비밀번호를 임시 비밀번호로 재설정.
+
+    - 호출 측에서 IS_ADMIN 권한 검증 필수 (UI 레이어에서 처리)
+    - 새 salt 를 생성 → PBKDF2-SHA256 100k 해시 → profiles UPDATE
+    - 기존 Supabase Auth 경로는 차단 (supabase_uid=None) 하여 PBKDF2 단일 경로로 통일
+    - 사용자에게 첫 로그인 후 즉시 변경하도록 안내해야 함
+    """
+    if not new_password or len(new_password) < 4:
+        return False, "비밀번호는 4자 이상이어야 합니다."
+    salt    = _new_salt()
+    pw_hash = _hash_pw(new_password, salt)
+    sb.table("profiles").update({
+        "password_hash": pw_hash,
+        "salt":          salt,
+        "supabase_uid":  None,
+        "updated_at":    now_str(),
+    }).eq("id", user_id).execute()
+    return True, "비밀번호가 재설정되었습니다."
+
+
 def auth_reset() -> None:
     st.session_state["AUTH_OK"]    = False
     st.session_state["IS_ADMIN"]   = False

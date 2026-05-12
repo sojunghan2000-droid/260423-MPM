@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 3
 
     env:
-      APP_URL: https://sctmpmsongdo2block.streamlit.app/
+      APP_URL: https://songdo2-ino.streamlit.app/
 
     steps:
       - name: HTTP ping

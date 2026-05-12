@@ -144,7 +144,7 @@ git checkout b983c46 -- modules/outputs/pdf.py core/header.py
 
 | 항목 | 값 |
 |------|----|
-| Streamlit Cloud URL | https://sctmpmsongdo2block.streamlit.app |
+| Streamlit Cloud URL | https://songdo2-ino.streamlit.app |
 | GitHub repo | `sojunghan2000-droid/260423-MPM` |
 | 브랜치 | `master` |
 | 배포 트리거 | `git push origin master` 시 자동 재빌드 (1~2분) |

@@ -1170,9 +1170,25 @@ def page_schedule(con):
                 save = delete = submitted = False
             else:
                 st.markdown("---")
+                # 현재 선택 시그니처 계산 — 직전 신청 시그니처와 같으면 "예약 완료" 비활성 표시,
+                # 슬롯·날짜·존·구분 중 하나라도 바뀌면 자동으로 "예약 신청" 활성 복귀
+                _now_kind_val  = KIND_IN if new_kind == "반입" else KIND_OUT
+                _now_slots_key = "sched_sel_in_slots" if _now_kind_val == KIND_IN else "sched_sel_out_slots"
+                _now_slots     = tuple(sorted(st.session_state.get(_now_slots_key, [])))
+                _now_zone      = st.session_state.get("sched_current_zone", "") or ""
+                _now_date      = str(current_date)
+                _now_sig       = (_now_kind_val, _now_date, _now_zone, _now_slots)
+                _saved_sig     = st.session_state.get("sched_submitted_sig")
+                _already_done  = bool(_now_slots) and _saved_sig == _now_sig
+                if _saved_sig is not None and not _already_done:
+                    st.session_state.pop("sched_submitted_sig", None)
                 with st.container(key="sched_submit_btn"):
-                    submitted = st.form_submit_button("📋 예약 신청", type="primary",
-                                                      use_container_width=True)
+                    submitted = st.form_submit_button(
+                        "✅ 예약 완료" if _already_done else "📋 예약 신청",
+                        type="primary",
+                        disabled=_already_done,
+                        use_container_width=True,
+                    )
                 save = delete = False
 
         # ── 추가 슬롯 저장 (뷰 모드 시간 연장) ──────────────────────────────
@@ -1367,10 +1383,17 @@ def page_schedule(con):
                 approvals_create_default(con, rid, kind_val)
                 disp = req_display_id(req_get(con, rid) or {"id": rid})
                 st.success(f"✅ 예약 신청 완료 ({disp}) — {req_date} {req_from}~{req_to} / {gate}")
-                if kind_val == KIND_IN:
-                    st.session_state["sched_sel_in_slots"] = []
-                else:
-                    st.session_state["sched_sel_out_slots"] = []
-                st.session_state["sched_current_date"]     = current_date
-                st.session_state["sched_mobile_show_form"] = False
+                # 슬롯·폼은 그대로 유지하고 시그니처만 저장 → 버튼이 "예약 완료"로 표시됨
+                _done_slots = tuple(sorted(
+                    st.session_state.get(
+                        "sched_sel_in_slots" if kind_val == KIND_IN else "sched_sel_out_slots",
+                        [])
+                ))
+                st.session_state["sched_submitted_sig"] = (
+                    kind_val,
+                    req_date,
+                    st.session_state.get("sched_current_zone", "") or "",
+                    _done_slots,
+                )
+                st.session_state["sched_current_date"] = current_date
                 st.rerun()

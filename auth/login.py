@@ -2,7 +2,10 @@
 import streamlit as st
 from supabase import Client
 from config import ROLES
-from auth.session import auth_login, auth_reset, user_create, project_has_users
+from auth.session import (
+    auth_login, auth_reset, user_create, project_has_users,
+    request_password_reset, verify_reset_and_update,
+)
 from db.models import project_list, project_get, project_create, modules_for_project, module_toggle
 
 
@@ -128,6 +131,30 @@ def _page_login_form(con: Client, project_id: str, project_name: str) -> None:
                 if ok:
                     st.rerun()
 
+    # 비밀번호 찾기 링크 (로그인 폼 바로 아래)
+    with st.container(key="login_forgot_pw"):
+        st.markdown("""
+        <style>
+        .st-key-login_forgot_pw button {
+            background: transparent !important;
+            border: none !important;
+            color: #64748b !important;
+            font-size: 13px !important;
+            min-height: 0 !important;
+            padding: 8px 0 !important;
+            text-decoration: underline !important;
+        }
+        .st-key-login_forgot_pw button:hover {
+            color: var(--primary-700) !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        if st.button("비밀번호를 잊으셨나요?", key="go_reset", use_container_width=True):
+            st.session_state["auth_mode"] = "reset"
+            st.session_state.pop("reset_step", None)
+            st.session_state.pop("reset_email", None)
+            st.rerun()
+
     with st.container(key="login_signup_btn"):
         st.markdown(
             '<div style="text-align:center;padding-top:14px;font-size:13px;color:#64748b;">'
@@ -204,6 +231,7 @@ def _page_signup_form(con: Client, project_id: str, project_name: str) -> None:
     with st.container(key="signup_form_wrap"):
         with st.form("signup_form", clear_on_submit=False):
             username     = st.text_input("아이디 *", placeholder="영문·숫자 조합 (로그인 시 사용)")
+            email        = st.text_input("이메일 *", placeholder="비밀번호 찾기 시 사용됩니다")
             name         = st.text_input("이름/직책 *", placeholder="예) 김삼성/건축시공")
             company_name = st.text_input("업체명 *", placeholder="예) OO내장, OO설비")
             role         = st.selectbox("부서 *", ROLES, index=None, placeholder="소속 부서 선택")
@@ -225,6 +253,7 @@ def _page_signup_form(con: Client, project_id: str, project_name: str) -> None:
         if submitted:
             errors = []
             if not username.strip():     errors.append("아이디")
+            if not email.strip():        errors.append("이메일")
             if not name.strip():         errors.append("이름/직책")
             if not company_name.strip(): errors.append("업체명")
             if not role:                 errors.append("부서")
@@ -241,13 +270,131 @@ def _page_signup_form(con: Client, project_id: str, project_name: str) -> None:
                 st.error("Admin PIN이 올바르지 않습니다.")
                 return
 
-            ok, msg = user_create(con, project_id, username, pw1, name, role, is_admin, company_name)
+            ok, msg = user_create(con, project_id, username, pw1, name, role,
+                                  is_admin, company_name, email)
             if ok:
-                st.success(f"✅ {msg} 로그인하세요.")
+                st.success(f"✅ {msg}")
                 st.session_state["auth_mode"] = "login"
                 st.rerun()
             else:
                 st.error(msg)
+
+
+# ── 비밀번호 재설정 폼 (이메일 OTP) ─────────────────────────────────────
+
+def _page_reset_form(con: Client, project_id: str, project_name: str) -> None:
+    _login_header(project_name, "가입 시 등록한 이메일로 인증 코드를 보내드립니다")
+    st.markdown("""
+    <style>
+    .st-key-back_to_login_from_reset button {
+        min-height: 0 !important;
+        height: 32px !important;
+        padding: 0 12px !important;
+        border-radius: 0.5rem !important;
+        border: none !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+    .st-key-back_to_login_from_reset button p {
+        line-height: 1 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    if st.button("← 로그인으로 돌아가기", key="back_to_login_from_reset"):
+        st.session_state["auth_mode"] = "login"
+        st.session_state.pop("reset_step", None)
+        st.session_state.pop("reset_email", None)
+        st.rerun()
+
+    step = st.session_state.get("reset_step", "request")
+
+    # ── Step 1: 아이디 입력 → 메일 발송 ────────────────────────────────
+    if step == "request":
+        with st.container(key="reset_request_wrap"):
+            with st.form("reset_request_form"):
+                username = st.text_input(
+                    "아이디 *", placeholder="가입한 아이디 입력",
+                    key="reset_username",
+                )
+                submitted = st.form_submit_button(
+                    "인증 코드 받기", type="primary", use_container_width=True,
+                )
+
+            if submitted:
+                if not username.strip():
+                    st.error("아이디를 입력하세요.")
+                else:
+                    ok, msg, email = request_password_reset(con, project_id, username)
+                    if ok:
+                        st.session_state["reset_step"]  = "verify"
+                        st.session_state["reset_email"] = email
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+        return
+
+    # ── Step 2: 코드 + 새 비번 입력 ──────────────────────────────────
+    email = st.session_state.get("reset_email", "")
+    masked = _mask_email(email)
+    st.info(f"📧 {masked} 으로 발송된 6자리 코드를 입력하세요.")
+
+    with st.container(key="reset_verify_wrap"):
+        with st.form("reset_verify_form"):
+            token = st.text_input(
+                "인증 코드 *", placeholder="메일로 받은 6자리 숫자",
+                max_chars=10, key="reset_token",
+            )
+            pw1 = st.text_input("새 비밀번호 *", type="password",
+                                placeholder="4자 이상", key="reset_pw1")
+            pw2 = st.text_input("새 비밀번호 확인 *", type="password",
+                                key="reset_pw2")
+            submitted = st.form_submit_button(
+                "비밀번호 변경", type="primary", use_container_width=True,
+            )
+
+        if submitted:
+            if pw1 != pw2:
+                st.error("새 비밀번호가 일치하지 않습니다.")
+            elif not token.strip():
+                st.error("인증 코드를 입력하세요.")
+            else:
+                ok, msg = verify_reset_and_update(con, email, token, pw1)
+                if ok:
+                    st.success(msg)
+                    st.session_state["auth_mode"] = "login"
+                    st.session_state.pop("reset_step", None)
+                    st.session_state.pop("reset_email", None)
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+    with st.container(key="reset_resend_wrap"):
+        st.markdown(
+            '<div style="text-align:center;padding-top:14px;font-size:13px;color:#64748b;">'
+            '코드를 받지 못하셨나요?</div>'
+            '<div style="height:8px;"></div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("다른 아이디로 다시 시도", key="reset_restart",
+                     use_container_width=True):
+            st.session_state["reset_step"] = "request"
+            st.session_state.pop("reset_email", None)
+            st.rerun()
+
+
+def _mask_email(email: str) -> str:
+    """이메일 표시용 마스킹 — 'jo***@gmail.com' 형태."""
+    if not email or "@" not in email:
+        return email
+    local, _, domain = email.partition("@")
+    if len(local) <= 2:
+        return f"{local[:1]}***@{domain}"
+    return f"{local[:2]}***@{domain}"
 
 
 # ── 메인 진입점 ───────────────────────────────────────────────────────────
@@ -260,7 +407,10 @@ def page_login(con: Client):
     if "auth_mode" not in st.session_state:
         st.session_state["auth_mode"] = "login"
 
-    if st.session_state["auth_mode"] == "signup":
+    mode = st.session_state["auth_mode"]
+    if mode == "signup":
         _page_signup_form(con, project_id, project_name)
+    elif mode == "reset":
+        _page_reset_form(con, project_id, project_name)
     else:
         _page_login_form(con, project_id, project_name)

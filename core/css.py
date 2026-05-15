@@ -1290,5 +1290,19 @@ def inject_css():
     [data-testid="InputInstructions"] {
       display: none !important;
     }
+    /* ── 인증 화면(로그인/회원가입/비번찾기): 데스크톱에서 폭 절반·중앙정렬 ── */
+    @media (min-width: 769px) {
+      .st-key-login_form_wrap,
+      .st-key-login_forgot_pw,
+      .st-key-login_signup_btn,
+      .st-key-signup_form_wrap,
+      .st-key-reset_request_wrap,
+      .st-key-reset_verify_wrap,
+      .st-key-reset_resend_wrap {
+        max-width: 50% !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+      }
+    }
     </style>
     """, unsafe_allow_html=True)

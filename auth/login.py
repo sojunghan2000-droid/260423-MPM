@@ -342,12 +342,12 @@ def _page_reset_form(con: Client, project_id: str, project_name: str) -> None:
     # ── Step 2: 코드 + 새 비번 입력 ──────────────────────────────────
     email = st.session_state.get("reset_email", "")
     masked = _mask_email(email)
-    st.info(f"📧 {masked} 으로 발송된 6자리 코드를 입력하세요.")
+    st.info(f"📧 {masked} 으로 발송된 8자리 코드를 입력하세요.")
 
     with st.container(key="reset_verify_wrap"):
         with st.form("reset_verify_form"):
             token = st.text_input(
-                "인증 코드 *", placeholder="메일로 받은 6자리 숫자",
+                "인증 코드 *", placeholder="메일로 받은 8자리 숫자",
                 max_chars=10, key="reset_token",
             )
             pw1 = st.text_input("새 비밀번호 *", type="password",

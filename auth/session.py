@@ -242,7 +242,7 @@ def request_password_reset(sb: Client, project_id: str,
     except Exception as e:
         return False, f"재설정 메일 발송 실패: {e}", ""
 
-    return True, "재설정 메일을 발송했습니다. 메일의 6자리 코드를 입력하세요.", email
+    return True, "재설정 메일을 발송했습니다. 메일의 8자리 코드를 입력하세요.", email
 
 
 def verify_reset_and_update(sb: Client, email: str, token: str,

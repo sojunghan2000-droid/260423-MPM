@@ -127,9 +127,10 @@ def _page_login_form(con: Client, project_id: str, project_name: str) -> None:
                 st.error("아이디와 비밀번호를 모두 입력하세요.")
             else:
                 ok, msg = auth_login(con, username, password)
-                (st.success if ok else st.error)(msg)
                 if ok:
+                    # 성공 시: 메시지 렌더 없이 즉시 rerun (partial render 잔상 방지)
                     st.rerun()
+                st.error(msg)
 
     # 비밀번호 찾기 링크 (로그인 폼 바로 아래)
     with st.container(key="login_forgot_pw"):
@@ -273,7 +274,7 @@ def _page_signup_form(con: Client, project_id: str, project_name: str) -> None:
             ok, msg = user_create(con, project_id, username, pw1, name, role,
                                   is_admin, company_name, email)
             if ok:
-                st.success(f"✅ {msg}")
+                st.toast(f"✅ {msg}", icon="✅")
                 st.session_state["auth_mode"] = "login"
                 st.rerun()
             else:
@@ -332,7 +333,7 @@ def _page_reset_form(con: Client, project_id: str, project_name: str) -> None:
                     if ok:
                         st.session_state["reset_step"]  = "verify"
                         st.session_state["reset_email"] = email
-                        st.success(msg)
+                        st.toast(msg, icon="📧")
                         st.rerun()
                     else:
                         st.error(msg)
@@ -365,7 +366,7 @@ def _page_reset_form(con: Client, project_id: str, project_name: str) -> None:
             else:
                 ok, msg = verify_reset_and_update(con, email, token, pw1)
                 if ok:
-                    st.success(msg)
+                    st.toast(msg, icon="✅")
                     st.session_state["auth_mode"] = "login"
                     st.session_state.pop("reset_step", None)
                     st.session_state.pop("reset_email", None)

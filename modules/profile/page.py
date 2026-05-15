@@ -54,7 +54,7 @@ def page_profile(con: Client):
 
         st.markdown("#### 비밀번호 변경 (변경 시에만 입력)")
         cur_pw  = st.text_input("현재 비밀번호", type="password")
-        new_pw1 = st.text_input("새 비밀번호", type="password", placeholder="4자 이상")
+        new_pw1 = st.text_input("새 비밀번호", type="password", placeholder="6자 이상")
         new_pw2 = st.text_input("새 비밀번호 확인", type="password")
 
         if st.button("저장", type="primary", use_container_width=True):
@@ -73,8 +73,8 @@ def page_profile(con: Client):
                 if not new_pw1:
                     st.error("새 비밀번호를 입력하세요.")
                     return
-                if len(new_pw1) < 4:
-                    st.error("비밀번호는 4자 이상이어야 합니다.")
+                if len(new_pw1) < 6:
+                    st.error("비밀번호는 6자 이상이어야 합니다.")
                     return
                 if new_pw1 != new_pw2:
                     st.error("새 비밀번호가 일치하지 않습니다.")

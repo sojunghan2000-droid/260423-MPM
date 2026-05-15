@@ -408,7 +408,7 @@ def page_admin(con: Client):
                             "현재 비밀번호 확인 후 변경하는 것을 권장합니다."
                         )
                     _np1 = st.text_input(
-                        "새 임시 비밀번호 (4자 이상) *",
+                        "새 임시 비밀번호 (6자 이상) *",
                         type="password",
                         key=f"pwreset_new1_{short}",
                         placeholder="임시 비밀번호 — 사용자에게 직접 전달",
@@ -424,8 +424,8 @@ def page_admin(con: Client):
                                      key=f"pwreset_do_{short}",
                                      type="primary",
                                      use_container_width=True):
-                            if not _np1 or len(_np1) < 4:
-                                st.error("비밀번호는 4자 이상이어야 합니다.")
+                            if not _np1 or len(_np1) < 6:
+                                st.error("비밀번호는 6자 이상이어야 합니다.")
                             elif _np1 != _np2:
                                 st.error("두 비밀번호가 일치하지 않습니다.")
                             else:

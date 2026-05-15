@@ -238,7 +238,7 @@ def _page_signup_form(con: Client, project_id: str, project_name: str) -> None:
             role         = st.selectbox("부서 *", ROLES, index=None, placeholder="소속 부서 선택")
 
             st.markdown("---")
-            pw1 = st.text_input("비밀번호 *", type="password", placeholder="4자 이상")
+            pw1 = st.text_input("비밀번호 *", type="password", placeholder="6자 이상")
             pw2 = st.text_input("비밀번호 확인 *", type="password")
 
             # 관리자 계정 신청 (선택)
@@ -351,7 +351,7 @@ def _page_reset_form(con: Client, project_id: str, project_name: str) -> None:
                 max_chars=10, key="reset_token",
             )
             pw1 = st.text_input("새 비밀번호 *", type="password",
-                                placeholder="4자 이상", key="reset_pw1")
+                                placeholder="6자 이상", key="reset_pw1")
             pw2 = st.text_input("새 비밀번호 확인 *", type="password",
                                 key="reset_pw2")
             submitted = st.form_submit_button(

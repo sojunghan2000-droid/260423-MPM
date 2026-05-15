@@ -45,8 +45,8 @@ def user_create(sb: Client, project_id: str, username: str, password: str,
 
     Confirm email 이 켜져 있으면 가입 직후 로그인 불가 (메일 확인 필요).
     """
-    if len(password) < 4:
-        return False, "비밀번호는 4자 이상이어야 합니다."
+    if len(password) < 6:
+        return False, "비밀번호는 6자 이상이어야 합니다."
     email = _norm_email(email)
     if not email or "@" not in email or "." not in email.split("@")[-1]:
         return False, "올바른 이메일 주소를 입력하세요."
@@ -199,16 +199,12 @@ def admin_reset_user_password(sb: Client, user_id: str,
                               new_password: str) -> Tuple[bool, str]:
     """관리자용 — 다른 사용자의 비밀번호를 임시 비밀번호로 재설정 (PBKDF2 경로).
 
-    - 호출 측에서 IS_ADMIN 권한 검증 필수 (UI 레이어에서 처리)
-    - 새 salt 를 생성 → PBKDF2-SHA256 100k 해시 → profiles UPDATE
-    - 기존 Supabase Auth 경로는 차단 (supabase_uid=None) 하여 PBKDF2 단일 경로로 통일
-    - 사용자에게 첫 로그인 후 즉시 변경하도록 안내해야 함
-    - NOTE: 신규 Supabase Auth 계정에는 이 헬퍼가 적용되지 않습니다.
-      Supabase Auth 계정의 관리자 reset 은 Service Role Key 가 필요해 클라이언트에서 직접 수행 불가.
-      Supabase Auth 계정 사용자는 셀프 reset(메일 OTP) 흐름을 이용해야 합니다.
+    NOTE: 신규 Supabase Auth 계정에는 이 헬퍼가 적용되지 않습니다.
+    Supabase Auth 계정의 관리자 reset 은 Service Role Key 가 필요해 클라이언트에서 직접 수행 불가.
+    Supabase Auth 계정 사용자는 셀프 reset(메일 OTP) 흐름을 이용해야 합니다.
     """
-    if not new_password or len(new_password) < 4:
-        return False, "비밀번호는 4자 이상이어야 합니다."
+    if not new_password or len(new_password) < 6:
+        return False, "비밀번호는 6자 이상이어야 합니다."
     salt    = _new_salt()
     pw_hash = _hash_pw(new_password, salt)
     sb.table("profiles").update({
@@ -252,8 +248,8 @@ def request_password_reset(sb: Client, project_id: str,
 def verify_reset_and_update(sb: Client, email: str, token: str,
                             new_password: str) -> Tuple[bool, str]:
     """OTP 코드를 검증한 뒤 새 비밀번호로 변경."""
-    if not new_password or len(new_password) < 4:
-        return False, "비밀번호는 4자 이상이어야 합니다."
+    if not new_password or len(new_password) < 6:
+        return False, "비밀번호는 6자 이상이어야 합니다."
     if not token.strip():
         return False, "인증 코드를 입력하세요."
 

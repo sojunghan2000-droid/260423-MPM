@@ -246,7 +246,7 @@ def _page_signup_form(con: Client, project_id: str, project_name: str) -> None:
                 email        = st.text_input("이메일 *", placeholder="비밀번호 찾기 시 사용됩니다")
                 name         = st.text_input("이름/직책 *", placeholder="예) 김삼성/건축시공")
                 company_name = st.text_input("업체명 *", placeholder="예) OO내장, OO설비")
-                role         = st.selectbox("부서 *", ROLES, index=None, placeholder="소속 부서 선택")
+                role         = st.selectbox("구분 *", ROLES, index=None, placeholder="소속 구분 선택")
 
                 st.markdown("---")
                 pw1 = st.text_input("비밀번호 *", type="password", placeholder="6자 이상")
@@ -268,7 +268,7 @@ def _page_signup_form(con: Client, project_id: str, project_name: str) -> None:
                 if not email.strip():        errors.append("이메일")
                 if not name.strip():         errors.append("이름/직책")
                 if not company_name.strip(): errors.append("업체명")
-                if not role:                 errors.append("부서")
+                if not role:                 errors.append("구분")
                 if not pw1:                errors.append("비밀번호")
                 if pw1 != pw2:
                     st.error("비밀번호가 일치하지 않습니다.")

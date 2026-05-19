@@ -49,7 +49,7 @@ def page_profile(con: Client):
         st.markdown("#### 기본 정보")
         new_name    = st.text_input("이름/직책 *", value=user.get("name", ""))
         new_company = st.text_input("업체명 *", value=user.get("company_name", ""))
-        new_role    = st.selectbox("부서 *", ROLES,
+        new_role    = st.selectbox("구분 *", ROLES,
                                    index=ROLES.index(user["role"]) if user.get("role") in ROLES else 0)
 
         st.markdown("#### 비밀번호 변경 (변경 시에만 입력)")

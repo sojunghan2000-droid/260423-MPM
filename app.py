@@ -20,6 +20,7 @@ from db.connection import con_open
 from core.css import inject_css
 from core.header import ui_header
 from core.nav import render_topnav
+from core.pwa import inject_pwa
 from core.sidebar import render_sidebar
 from auth.session import session_has_project, session_is_authed
 from auth.login import page_project_select, page_login
@@ -440,6 +441,9 @@ def main():
     """Main application entry point."""
     # ── DEBUG_TIMING: reset per-rerun timers (no-op when disabled) ──
     clear_timings()
+
+    # ── PWA: 송도2-INO 명칭/아이콘으로 manifest 덮어쓰기 (세션당 1회) ──
+    inject_pwa()
 
     # ── DEBUG_TIMING: inject Eruda mobile DevTools (no-op when disabled) ──
     _inject_eruda()

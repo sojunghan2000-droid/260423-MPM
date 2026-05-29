@@ -74,50 +74,80 @@ def inject_pwa() -> None:
         (function() {{
           try {{
             const pdoc = window.parent.document;
+            const OUR_MANIFEST = {json.dumps(manifest_uri)};
+            const OUR_TOUCH_ICON = {json.dumps(_ICON_180)};
+            const OUR_TITLE = {json.dumps(APP_NAME)};
+            const OUR_SHORT = {json.dumps(APP_SHORT_NAME)};
+            const OUR_THEME = {json.dumps(THEME_COLOR)};
 
-            // 1) 기존 Streamlit manifest <link> 제거
-            pdoc.querySelectorAll('link[rel="manifest"]').forEach(el => el.remove());
-
-            // 2) 새 manifest 주입
-            const ml = pdoc.createElement('link');
-            ml.rel = 'manifest';
-            ml.href = {json.dumps(manifest_uri)};
-            pdoc.head.appendChild(ml);
-
-            // 3) Apple iOS — manifest 무시하므로 메타태그로 별도 지정
-            const setMeta = (sel, attrs) => {{
-              let el = pdoc.head.querySelector(sel);
-              if (!el) {{
-                el = pdoc.createElement(sel.split('[')[0]);
-                pdoc.head.appendChild(el);
+            function applyOverrides() {{
+              // 1) 우리 것이 아닌 manifest <link> 제거 + 우리 것 보장
+              let ourMl = null;
+              pdoc.querySelectorAll('link[rel="manifest"]').forEach(el => {{
+                if (el.href === OUR_MANIFEST) ourMl = el;
+                else el.remove();
+              }});
+              if (!ourMl) {{
+                ourMl = pdoc.createElement('link');
+                ourMl.rel = 'manifest';
+                ourMl.href = OUR_MANIFEST;
+                pdoc.head.appendChild(ourMl);
               }}
-              for (const k in attrs) el.setAttribute(k, attrs[k]);
-            }};
-            setMeta('meta[name="apple-mobile-web-app-title"]',
-                    {{name: 'apple-mobile-web-app-title', content: {json.dumps(APP_SHORT_NAME)}}});
-            setMeta('meta[name="apple-mobile-web-app-capable"]',
-                    {{name: 'apple-mobile-web-app-capable', content: 'yes'}});
-            setMeta('meta[name="apple-mobile-web-app-status-bar-style"]',
-                    {{name: 'apple-mobile-web-app-status-bar-style', content: 'default'}});
 
-            // Apple touch icon (180x180)
-            pdoc.querySelectorAll('link[rel="apple-touch-icon"]').forEach(el => el.remove());
-            const ai = pdoc.createElement('link');
-            ai.rel = 'apple-touch-icon';
-            ai.href = {json.dumps(_ICON_180)};
-            pdoc.head.appendChild(ai);
+              // 2) Apple iOS 메타
+              const setMeta = (sel, attrs) => {{
+                let el = pdoc.head.querySelector(sel);
+                if (!el) {{
+                  el = pdoc.createElement(sel.split('[')[0]);
+                  pdoc.head.appendChild(el);
+                }}
+                for (const k in attrs) el.setAttribute(k, attrs[k]);
+              }};
+              setMeta('meta[name="apple-mobile-web-app-title"]',
+                      {{name: 'apple-mobile-web-app-title', content: OUR_SHORT}});
+              setMeta('meta[name="apple-mobile-web-app-capable"]',
+                      {{name: 'apple-mobile-web-app-capable', content: 'yes'}});
+              setMeta('meta[name="apple-mobile-web-app-status-bar-style"]',
+                      {{name: 'apple-mobile-web-app-status-bar-style', content: 'default'}});
+              setMeta('meta[name="theme-color"]',
+                      {{name: 'theme-color', content: OUR_THEME}});
 
-            // theme-color 메타도 동기화
-            setMeta('meta[name="theme-color"]',
-                    {{name: 'theme-color', content: {json.dumps(THEME_COLOR)}}});
+              // 3) apple-touch-icon — 우리 것 아닌 건 제거
+              let ourAi = null;
+              pdoc.querySelectorAll('link[rel="apple-touch-icon"]').forEach(el => {{
+                if (el.getAttribute('href') === OUR_TOUCH_ICON) ourAi = el;
+                else el.remove();
+              }});
+              if (!ourAi) {{
+                ourAi = pdoc.createElement('link');
+                ourAi.rel = 'apple-touch-icon';
+                ourAi.href = OUR_TOUCH_ICON;
+                pdoc.head.appendChild(ourAi);
+              }}
 
-            // 4) 페이지 타이틀 (st.set_page_config 가 set 한 값을 덮어쓰지 않음)
-            //    Streamlit 기본 타이틀이 "Streamlit" 으로 떨어지는 경우만 보정
-            if (pdoc.title === 'Streamlit' || !pdoc.title) {{
-              pdoc.title = {json.dumps(APP_NAME)};
+              // 4) 페이지 타이틀이 "Streamlit" 으로 떨어지면 보정
+              if (pdoc.title === 'Streamlit' || !pdoc.title) {{
+                pdoc.title = OUR_TITLE;
+              }}
             }}
 
-            console.log('[pwa] manifest+apple meta injected:', {json.dumps(APP_NAME)});
+            applyOverrides();
+
+            // ── 방어 1: <head> 변경 감지해 Streamlit 이 기본 manifest 를 재삽입하면 즉시 제거 ──
+            if (!pdoc.__pwaHeadObserver) {{
+              const obs = new MutationObserver(applyOverrides);
+              obs.observe(pdoc.head, {{ childList: true, subtree: true }});
+              pdoc.__pwaHeadObserver = obs;
+            }}
+
+            // ── 방어 2: 첫 5초 동안 0.5초 간격 재적용 (지연 로딩 대비) ──
+            let attempts = 0;
+            const iv = setInterval(() => {{
+              applyOverrides();
+              if (++attempts >= 10) clearInterval(iv);
+            }}, 500);
+
+            console.log('[pwa] manifest+apple meta injected:', OUR_TITLE);
           }} catch (e) {{
             console.warn('[pwa] inject failed:', e);
           }}

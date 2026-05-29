@@ -28,33 +28,10 @@ THEME_COLOR     = "#1d4ed8"
 BG_COLOR        = "#f8fafc"
 
 # Streamlit 의 정적 서빙 경로. Cloud / localhost 모두 동일 URL 규칙.
-_ICON_192 = "./app/static/icon-192.png"
-_ICON_512 = "./app/static/icon-512.png"
-_ICON_180 = "./app/static/icon-180.png"
-
-
-def _build_manifest_data_uri() -> str:
-    manifest = {
-        "name":             APP_NAME,
-        "short_name":       APP_SHORT_NAME,
-        "description":      APP_DESCRIPTION,
-        "start_url":        ".",
-        "scope":            ".",
-        "display":          "standalone",
-        "orientation":      "any",
-        "theme_color":      THEME_COLOR,
-        "background_color": BG_COLOR,
-        "lang":             "ko",
-        "icons": [
-            {"src": _ICON_192, "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
-            {"src": _ICON_512, "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
-        ],
-    }
-    raw = json.dumps(manifest, ensure_ascii=False, separators=(",", ":"))
-    # 안전한 인코딩 — JS 에 그대로 넣지 않고 base64 데이터 URI 로 노출
-    import base64
-    b64 = base64.b64encode(raw.encode("utf-8")).decode("ascii")
-    return f"data:application/manifest+json;base64,{b64}"
+# 절대 경로(/app/static/...)로 — manifest 가 data URI 가 아닌 정적 파일이라야
+# 상대 경로 해석/아이콘 fetch 가 안정적임 (Chrome PWA 검증 기준).
+_MANIFEST_URL = "/app/static/manifest.json?v=3"
+_ICON_180     = "/app/static/icon-180.png"
 
 
 def inject_pwa() -> None:
@@ -66,7 +43,7 @@ def inject_pwa() -> None:
         return
     st.session_state["__pwa_injected"] = True
 
-    manifest_uri = _build_manifest_data_uri()
+    manifest_uri = _MANIFEST_URL
 
     components.html(
         f"""

@@ -184,7 +184,7 @@ def project_has_users(sb: Client, project_id: str) -> bool:
 
 def user_list(sb: Client, project_id: str):
     res = (sb.table("profiles")
-           .select("id,username,name,role,is_admin,company_name,email,created_at")
+           .select("id,username,name,role,is_admin,is_sysadmin,company_name,email,created_at")
            .eq("project_id", project_id)
            .order("created_at", desc=True)
            .execute())
@@ -193,6 +193,20 @@ def user_list(sb: Client, project_id: str):
 
 def user_delete(sb: Client, user_id: str) -> None:
     sb.table("profiles").delete().eq("id", user_id).execute()
+
+
+def set_user_admin(sb: Client, user_id: str, make_admin: bool) -> Tuple[bool, str]:
+    """관리자(is_admin) 권한 부여/해제.
+
+    - 권한 검증(부여=관리자 이상, 해제=시스템관리자)은 호출 측 UI 에서 수행
+    - 시스템관리자(is_sysadmin)는 이 함수로 변경하지 않음 (DB/개발자 전용)
+    """
+    sb.table("profiles").update({
+        "is_admin":   int(bool(make_admin)),
+        "updated_at": now_str(),
+    }).eq("id", user_id).execute()
+    return True, ("관리자 권한을 부여했습니다." if make_admin
+                  else "관리자 권한을 해제했습니다.")
 
 
 def admin_reset_user_password(sb: Client, user_id: str,
@@ -277,8 +291,9 @@ def verify_reset_and_update(sb: Client, email: str, token: str,
 # ── 세션 헬퍼 ─────────────────────────────────────────────────────────
 
 def auth_reset() -> None:
-    st.session_state["AUTH_OK"]    = False
-    st.session_state["IS_ADMIN"]   = False
+    st.session_state["AUTH_OK"]     = False
+    st.session_state["IS_ADMIN"]    = False
+    st.session_state["IS_SYSADMIN"] = False
     st.session_state["USER_NAME"]  = ""
     st.session_state["USER_ROLE"]  = "협력사"
     st.session_state["ACTIVE_PAGE"] = "홈"
@@ -292,8 +307,11 @@ def auth_login(sb: Client, username: str, password: str) -> Tuple[bool, str]:
         if err == "EMAIL_NOT_CONFIRMED":
             return False, "이메일 확인이 필요합니다. 가입 시 받은 메일의 인증 링크를 클릭한 뒤 다시 시도하세요."
         return False, "아이디 또는 비밀번호가 올바르지 않습니다."
+    is_sysadmin = bool(user.get("is_sysadmin"))
     st.session_state["AUTH_OK"]      = True
-    st.session_state["IS_ADMIN"]     = bool(user.get("is_admin"))
+    # 시스템관리자는 관리자 권한 상위호환 → 관리자 페이지/기능 모두 접근
+    st.session_state["IS_ADMIN"]     = bool(user.get("is_admin")) or is_sysadmin
+    st.session_state["IS_SYSADMIN"]  = is_sysadmin
     st.session_state["USER_NAME"]    = user.get("name", "")
     st.session_state["USER_ROLE"]    = user.get("role", "협력사")
     st.session_state["USER_COMPANY"] = user.get("company_name", "") or ""

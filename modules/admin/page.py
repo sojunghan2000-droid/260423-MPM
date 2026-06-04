@@ -281,17 +281,20 @@ def page_admin(con: Client):
 
     st.markdown("---")
 
-    # ── 사용자 관리 — 비밀번호 재설정 ─────────────────────────────────────
+    # ── 사용자 설정 변경 — 비밀번호 재설정 + 권한 관리 ────────────────────
     #
-    # 사용자가 비밀번호를 분실했을 때 관리자가 임시 비밀번호를 부여하기 위한 UI.
     # · 보안: IS_ADMIN 권한자만 진입 (페이지 상단 가드)
-    # · 본인 비밀번호 변경은 [내정보] 페이지에서 현재 비밀번호 확인 후 변경
-    # · 임시 비밀번호는 안전하지 않을 수 있으므로 첫 로그인 후 변경 안내 필수
-    from auth.session import user_list, admin_reset_user_password
+    # · 비밀번호 재설정: 분실 시 임시 비밀번호 부여 (첫 로그인 후 변경 안내)
+    # · 관리자 권한 부여: 관리자 이상이면 가능
+    # · 관리자 권한 해제: 시스템관리자만 가능
+    # · 시스템관리자(is_sysadmin)는 앱에서 변경 불가 — DB/개발자 전용
+    from auth.session import user_list, admin_reset_user_password, set_user_admin
 
-    st.markdown("#### 👥 사용자 비밀번호 재설정")
-    st.caption("사용자가 비밀번호를 분실한 경우 임시 비밀번호를 부여합니다. "
-               "사용자에게 첫 로그인 후 [내정보]에서 즉시 변경하도록 안내하세요.")
+    is_sysadmin = bool(st.session_state.get("IS_SYSADMIN", False))
+
+    st.markdown("#### 👥 사용자 설정 변경")
+    st.caption("비밀번호 재설정 및 관리자 권한을 관리합니다. "
+               "관리자 권한 부여는 관리자 이상, 해제는 시스템관리자만 가능합니다.")
 
     my_username = st.session_state.get("USER_ID", "")
     _users = user_list(con, project_id) if project_id else []
@@ -367,11 +370,16 @@ def page_admin(con: Client):
             uid    = u["id"]
             uname  = u.get("username") or "—"
             nm     = u.get("name") or ""
-            urole  = u.get("role") or ""
+            urole       = u.get("role") or ""
+            u_is_sys    = bool(u.get("is_sysadmin"))
+            u_is_admin  = bool(u.get("is_admin"))
+            is_self     = bool(uname and uname == my_username)
             badges = []
-            if u.get("is_admin"):
+            if u_is_sys:
+                badges.append("👑시스템관리자")
+            elif u_is_admin:
                 badges.append("🔐관리자")
-            if uname and uname == my_username:
+            if is_self:
                 badges.append("본인")
             badge_txt = (" · " + " · ".join(badges)) if badges else ""
 
@@ -383,7 +391,7 @@ def page_admin(con: Client):
                         f"**{uname}** · {nm} ({urole}){badge_txt}"
                     )
                 with rc:
-                    if st.button("재설정", key=f"pwreset_btn_{short}",
+                    if st.button("설정", key=f"pwreset_btn_{short}",
                                  use_container_width=True):
                         st.session_state["pwreset_target_id"]   = uid
                         st.session_state["pwreset_target_name"] = f"{uname} ({nm})"
@@ -399,9 +407,39 @@ def page_admin(con: Client):
             # 인라인 폼: 이 사용자가 선택된 경우에만 표시
             if st.session_state.get("pwreset_target_id") == uid:
                 with st.container(key=f"pwreset_form_{short}"):
-                    st.markdown(
-                        f"⚠ **{uname} ({nm})** 의 비밀번호를 재설정합니다."
-                    )
+                    st.markdown(f"⚙ **{uname} ({nm})** 설정 변경")
+
+                    # ── 권한 관리 ──────────────────────────────────────
+                    st.markdown("**권한**")
+                    if u_is_sys:
+                        st.caption("👑 시스템관리자 — 권한 변경은 DB/개발자 전용입니다.")
+                    elif is_self:
+                        st.caption("본인 권한은 변경할 수 없습니다.")
+                    elif u_is_admin:
+                        # 관리자 → 해제 (시스템관리자만)
+                        if is_sysadmin:
+                            if st.button("🔓 관리자 권한 해제",
+                                         key=f"perm_revoke_{short}",
+                                         use_container_width=True):
+                                ok, msg = set_user_admin(con, uid, False)
+                                st.toast(f"✅ {uname} {msg}", icon="🔓")
+                                st.rerun()
+                        else:
+                            st.caption("관리자 권한 해제는 시스템관리자만 가능합니다.")
+                    else:
+                        # 비관리자 → 부여 (관리자 이상)
+                        if st.button("🔐 관리자 권한 부여",
+                                     key=f"perm_grant_{short}",
+                                     type="primary",
+                                     use_container_width=True):
+                            ok, msg = set_user_admin(con, uid, True)
+                            st.toast(f"✅ {uname} {msg}", icon="🔐")
+                            st.rerun()
+
+                    st.markdown("---")
+
+                    # ── 비밀번호 재설정 ────────────────────────────────
+                    st.markdown("**비밀번호 재설정**")
                     if uname == my_username:
                         st.info(
                             "본인 비밀번호는 [내정보] 페이지에서 "

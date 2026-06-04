@@ -1377,6 +1377,7 @@ def page_schedule(con):
                     notes=notes.strip(),
                     requester_name=st.session_state.get("USER_NAME", ""),
                     requester_role=st.session_state.get("USER_ROLE", ""),
+                    requester_username=st.session_state.get("USER_ID", ""),
                     risk_level="MID", sic_training_url="",
                     booking_zone=st.session_state.get("sched_current_zone", "A"),
                 ))

@@ -122,7 +122,14 @@ def page_ledger(con: Client):
         item     = r.get('item_name') or '-'
         date     = (r.get('date') or r.get('created_at') or '')[:10]
         zone     = r.get('booking_zone') or 'A'
-        line     = f"**{disp_id}** · **[{kind_txt}]** [{zone}] {company} · {item} · {date} | {badge}"
+        # 신청자 — 이름(직책) + 로그인 ID(있을 때). 구버전 행은 ID 없으면 이름만.
+        req_name = r.get('requester_name') or '-'
+        req_uid  = r.get('requester_username') or ''
+        req_disp = f"{req_name} ({req_uid})" if req_uid else req_name
+        line     = (
+            f"**{disp_id}** · **[{kind_txt}]** [{zone}] {company} · {item} · {date} | {badge}"
+            f"  \n<span style=\"color:#64748b;font-size:12px;\">👤 신청자 {req_disp}</span>"
+        )
 
         can_delete = is_admin
 
@@ -130,11 +137,11 @@ def page_ledger(con: Client):
             with st.container(key=f"ledger_row_{rid}"):
                 tc, dc = st.columns([9, 1])
                 with tc:
-                    st.markdown(line)
+                    st.markdown(line, unsafe_allow_html=True)
                 with dc:
                     if st.button("삭제", key=f"ledger_del_{rid}", type="primary"):
                         req_delete(con, rid)
                         st.toast("삭제되었습니다.", icon="🗑️")
                         st.rerun()
         else:
-            st.markdown(line)
+            st.markdown(line, unsafe_allow_html=True)

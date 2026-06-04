@@ -139,6 +139,7 @@ def page_request(con: Client):
             notes=notes,
             requester_name=st.session_state.get("USER_NAME", ""),
             requester_role=st.session_state.get("USER_ROLE", ""),
+            requester_username=st.session_state.get("USER_ID", ""),
             risk_level=risk_level,
             sic_training_url="",
         ))

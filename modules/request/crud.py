@@ -17,7 +17,8 @@ _REQ_COLS = [
     "driver_name", "driver_phone",
     "worker_supervisor", "worker_guide", "worker_manager",
     "loading_method", "notes",
-    "requester_name", "requester_role", "risk_level", "sic_training_url",
+    "requester_name", "requester_role", "requester_username",
+    "risk_level", "sic_training_url",
     "booking_zone",
 ]
 

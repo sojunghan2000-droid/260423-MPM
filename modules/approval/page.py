@@ -9,8 +9,13 @@ from supabase import Client
 from modules.approval.crud import approvals_inbox, approval_mark
 from modules.request.crud import req_get
 from modules.outputs.crud import generate_all_outputs
+from modules.schedule.models import generate_time_slots
 from shared.signature import ui_signature_block
 from shared.helpers import req_display_id
+from shared.storage_plan import (
+    ground_zones, terminals_b1, terminals_b2, default_days, add_days,
+    occupancy_on, conflicts, assign_storage,
+)
 
 
 def _pending_my_requests(con: Client, project_id: str, user_name: str):
@@ -45,6 +50,108 @@ def _pending_my_requests(con: Client, project_id: str, user_name: str):
             "step_no": ap.get("step_no"),
         })
     return out
+
+
+def _occ_grid_html(terminals, occ, selected) -> str:
+    cells = []
+    for t in terminals:
+        o = occ.get(t)
+        if o:
+            bg, fg = "#fee2e2", "#b91c1c"
+            sub = f"{(o['item'] or '')[:6]}<br>~{o['end'][5:]}"
+        else:
+            bg, fg, sub = "#dcfce7", "#15803d", "빈곳"
+        border = "2px solid #2563eb" if t == selected else "1px solid #e2e8f0"
+        cells.append(
+            f"<div style='width:62px;background:{bg};color:{fg};border:{border};"
+            f"border-radius:6px;padding:4px 2px;text-align:center;font-size:10px;line-height:1.2;'>"
+            f"<b>{t}</b><br><span style='font-size:9px'>{sub}</span></div>"
+        )
+    return "<div style='display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;'>" + "".join(cells) + "</div>"
+
+
+def _render_storage_module(con: Client, req: dict, rid: str) -> None:
+    """승인 대상 ↔ 서명 입력 사이: 하역(지상존/시간) + 저장(지하 터미널/기간) + 현황."""
+    import datetime as _dt
+
+    st.markdown("#### 📦 하역 · 저장 위치 / 현황")
+
+    project_id = st.session_state.get("PROJECT_ID", "")
+    slots = generate_time_slots()
+    ddays = default_days(con)
+
+    def _to_date(s, fallback):
+        try:
+            return _dt.date.fromisoformat((s or "")[:10])
+        except Exception:
+            return fallback
+
+    today = _dt.date.today()
+    req_date = _to_date(req.get("date"), today)
+
+    # ── 하역 (지상) ──────────────────────────────────────────────────
+    st.markdown("**하역 (지상)**")
+    gz = ground_zones(con)
+    cur_zone = req.get("booking_zone") or (gz[0] if gz else "A-Zone")
+    z_idx = gz.index(cur_zone) if cur_zone in gz else 0
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        sel_zone = st.selectbox("하역 존", gz, index=z_idx, key=f"st_zone_{rid}")
+    with c2:
+        tf = req.get("time_from") or slots[0]
+        tf_idx = slots.index(tf) if tf in slots else 0
+        sel_from = st.selectbox("하역 시작", slots, index=tf_idx, key=f"st_tf_{rid}")
+    with c3:
+        tt = req.get("time_to") or slots[min(tf_idx + 1, len(slots) - 1)]
+        tt_idx = slots.index(tt) if tt in slots else min(tf_idx + 1, len(slots) - 1)
+        sel_to = st.selectbox("하역 종료", slots, index=tt_idx, key=f"st_tt_{rid}")
+
+    # ── 저장 (지하 터미널) ──────────────────────────────────────────
+    st.markdown("**저장 (지하 터미널)**")
+    term_opts = ["(미지정)"] + terminals_b1() + terminals_b2()
+    cur_term = req.get("store_terminal") or "(미지정)"
+    t_idx = term_opts.index(cur_term) if cur_term in term_opts else 0
+    d1, d2, d3 = st.columns(3)
+    with d1:
+        sel_term = st.selectbox("저장 터미널", term_opts, index=t_idx, key=f"st_term_{rid}")
+    with d2:
+        s_start = st.date_input("저장 시작일", value=_to_date(req.get("store_start"), req_date),
+                                key=f"st_start_{rid}")
+    with d3:
+        _def_end = _to_date(req.get("store_end"),
+                            _to_date(add_days(str(s_start), ddays), req_date))
+        s_end = st.date_input("저장 종료일", value=_def_end, key=f"st_end_{rid}")
+
+    start_s, end_s = str(s_start), str(s_end)
+
+    # ── 현황 (저장 시작일 기준 터미널 점유) ─────────────────────────
+    st.caption(f"📅 {start_s} 기준 터미널 점유 현황 (빨강=점유, 초록=빈곳)")
+    occ = occupancy_on(con, project_id, start_s)
+    sel_t = None if sel_term == "(미지정)" else sel_term
+    st.markdown("<div style='font-size:11px;color:#64748b;margin:2px 0'>B1F</div>", unsafe_allow_html=True)
+    st.markdown(_occ_grid_html(terminals_b1(), occ, sel_t), unsafe_allow_html=True)
+    st.markdown("<div style='font-size:11px;color:#64748b;margin:2px 0'>B2F</div>", unsafe_allow_html=True)
+    st.markdown(_occ_grid_html(terminals_b2(), occ, sel_t), unsafe_allow_html=True)
+
+    # ── 충돌 검사 ───────────────────────────────────────────────────
+    blocked = False
+    if sel_t and end_s >= start_s:
+        cf = conflicts(con, project_id, sel_t, start_s, end_s, exclude_rid=rid)
+        if cf:
+            blocked = True
+            _names = ", ".join(f"{c.get('item_name') or '?'}(~{(c.get('store_end') or '')[:10]})" for c in cf)
+            st.error(f"⛔ {sel_t} 은(는) 해당 기간에 이미 점유 중입니다: {_names}")
+    if end_s < start_s:
+        st.warning("종료일이 시작일보다 빠릅니다.")
+
+    if st.button("📍 위치·기간 저장", key=f"st_save_{rid}", use_container_width=True,
+                 disabled=blocked or end_s < start_s):
+        assign_storage(con, rid, store_terminal=sel_t, store_start=start_s, store_end=end_s,
+                       booking_zone=sel_zone, time_from=sel_from, time_to=sel_to)
+        st.success("저장 위치·기간이 반영되었습니다.")
+        st.rerun()
+
+    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
 
 
 @measure("page.approval")
@@ -116,6 +223,12 @@ def page_approval(con: Client):
     rid = target["req_id"]
     req = req_get(con, rid)
     st.markdown(f"**{req_display_id(req)}** / {req.get('company_name')} / {req.get('item_name')}")
+
+    # ── 하역·저장 위치/현황 모듈 (승인 대상 ↔ 서명 입력 사이) ──────────
+    st.markdown("---")
+    _render_storage_module(con, req, rid)
+    st.markdown("---")
+
     st.markdown("""
     <style>
     [data-testid="stTextArea"] [data-testid="stWidgetLabel"],

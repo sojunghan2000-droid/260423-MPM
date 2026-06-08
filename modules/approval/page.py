@@ -8,9 +8,12 @@ from supabase import Client
 
 from modules.approval.crud import approvals_inbox, approval_mark
 from modules.request.crud import req_get
+from modules.execution.crud import photos_for_req
 from modules.outputs.crud import generate_all_outputs
 from shared.signature import ui_signature_block
+from shared.storage import cache_to_local
 from shared.helpers import req_display_id
+from db.connection import photos_bucket
 
 
 def _pending_my_requests(con: Client, project_id: str, user_name: str):
@@ -116,6 +119,25 @@ def page_approval(con: Client):
     rid = target["req_id"]
     req = req_get(con, rid)
     st.markdown(f"**{req_display_id(req)}** / {req.get('company_name')} / {req.get('item_name')}")
+
+    # ── 승인 대상 자재 사진 (서명 전 확인용) ──────────────────────────
+    _ap_photos = photos_for_req(con, rid)
+    if _ap_photos:
+        st.markdown("#### 📷 자재 사진")
+        _pcols = st.columns(3)
+        for _i, _p in enumerate(_ap_photos):
+            _src = _p.get("storage_url")
+            if not _src:
+                try:
+                    _src = str(cache_to_local(con, photos_bucket(), _p.get("file_path") or ""))
+                except Exception:
+                    _src = None
+            if _src:
+                with _pcols[_i % 3]:
+                    st.image(_src, use_container_width=True)
+    else:
+        st.caption("등록된 자재 사진이 없습니다.")
+
     st.markdown("""
     <style>
     [data-testid="stTextArea"] [data-testid="stWidgetLabel"],

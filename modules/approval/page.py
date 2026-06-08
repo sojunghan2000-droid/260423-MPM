@@ -14,7 +14,7 @@ from shared.signature import ui_signature_block
 from shared.helpers import req_display_id
 from shared.storage_plan import (
     ground_zones, terminals_b1, terminals_b2, default_days, add_days,
-    occupancy_on, conflicts, assign_storage,
+    occupancy_on, conflicts, assign_storage, floor_image,
 )
 
 
@@ -75,6 +75,18 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
     import datetime as _dt
 
     st.markdown("#### 📦 하역 · 저장 위치 / 현황")
+
+    # ── 도면 보기 (참조) ────────────────────────────────────────────
+    _img_g, _img_b1, _img_b2 = floor_image("ground"), floor_image("b1"), floor_image("b2")
+    if _img_g or _img_b1 or _img_b2:
+        with st.expander("🗺 도면 보기 (지상 · B1F · B2F)"):
+            _t_g, _t_b1, _t_b2 = st.tabs(["지상(하역)", "B1F(저장)", "B2F(저장)"])
+            with _t_g:
+                if _img_g: st.image(_img_g, use_container_width=True)
+            with _t_b1:
+                if _img_b1: st.image(_img_b1, use_container_width=True)
+            with _t_b2:
+                if _img_b2: st.image(_img_b2, use_container_width=True)
 
     project_id = st.session_state.get("PROJECT_ID", "")
     slots = generate_time_slots()

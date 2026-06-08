@@ -7,12 +7,20 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from supabase import Client
 
 from db.models import settings_get
+
+
+def floor_image(name: str) -> Optional[str]:
+    """도면 이미지 경로. name: 'b1' | 'b2' | 'ground'. 없으면 None."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    p = os.path.join(root, "assets", f"floor_{name}.jpg")
+    return p if os.path.exists(p) else None
 
 
 # ── 위치 상수 ─────────────────────────────────────────────────────────

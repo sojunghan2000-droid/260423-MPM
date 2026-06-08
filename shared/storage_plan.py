@@ -117,8 +117,13 @@ def assign_storage(con: Client, rid: str, *, store_terminal: Optional[str],
                    store_start: str, store_end: str,
                    booking_zone: Optional[str] = None,
                    time_from: Optional[str] = None,
-                   time_to: Optional[str] = None) -> None:
-    """요청에 하역존/시간 + 저장 터미널/기간 반영."""
+                   time_to: Optional[str] = None,
+                   sync_gate: bool = True) -> None:
+    """요청에 하역존/시간 + 저장 터미널/기간 반영.
+
+    sync_gate=True 면 선택 터미널을 gate 필드에도 반영(기존 신청-페이지
+    터미널 시스템과 일치). 터미널 미지정 시 gate 는 건드리지 않음.
+    """
     patch: Dict[str, Any] = {
         "store_terminal": store_terminal or None,
         "store_start":    store_start,
@@ -131,6 +136,8 @@ def assign_storage(con: Client, rid: str, *, store_terminal: Optional[str],
         patch["time_from"] = time_from
     if time_to is not None:
         patch["time_to"] = time_to
+    if sync_gate and store_terminal:
+        patch["gate"] = store_terminal
     con.table("requests").update(patch).eq("id", rid).execute()
 
 

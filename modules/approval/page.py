@@ -92,6 +92,12 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
     slots = generate_time_slots()
     ddays = default_days(con)
 
+    # ── 신청 입력값 요약 (신청 시 입력한 존·터미널·시간) ────────────────
+    _in_zone = req.get("booking_zone") or "-"
+    _in_gate = req.get("gate") or "-"
+    _in_time = f"{req.get('time_from','')}~{req.get('time_to','')}".strip("~")
+    st.info(f"📥 신청 입력 — 하역존: **{_in_zone}** · 터미널: **{_in_gate}** · 시간: **{_in_time or '-'}**")
+
     def _to_date(s, fallback):
         try:
             return _dt.date.fromisoformat((s or "")[:10])
@@ -121,7 +127,9 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
     # ── 저장 (지하 터미널) ──────────────────────────────────────────
     st.markdown("**저장 (지하 터미널)**")
     term_opts = ["(미지정)"] + terminals_b1() + terminals_b2()
-    cur_term = req.get("store_terminal") or "(미지정)"
+    # 신청 시 입력한 터미널(gate)을 기본값으로 — 저장 배정(store_terminal)이 있으면 우선
+    _entered_term = (req.get("gate") or "").split("|")[0].strip()
+    cur_term = req.get("store_terminal") or _entered_term or "(미지정)"
     t_idx = term_opts.index(cur_term) if cur_term in term_opts else 0
     d1, d2, d3 = st.columns(3)
     with d1:

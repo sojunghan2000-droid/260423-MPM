@@ -8,12 +8,18 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from supabase import Client
 
 from db.models import settings_get
+
+
+# 점유로 치는 요청 상태 (대기·승인·실행·완료/보관중). 반려 제외.
+STORAGE_BLOCKING_STATUS = {"PENDING_APPROVAL", "APPROVED", "EXECUTING", "DONE"}
+_TERMINAL_RE = re.compile(r"^B[12]-\d{2}$")
 
 
 def floor_image(name: str) -> Optional[str]:
@@ -71,29 +77,65 @@ def _overlaps(s1: str, e1: str, s2: str, e2: str) -> bool:
 
 # ── 점유 현황 / 충돌 ──────────────────────────────────────────────────
 
-def _active_storage_rows(con: Client, project_id: str) -> List[Dict[str, Any]]:
+def _eff_terminal(r: Dict[str, Any]) -> Optional[str]:
+    """유효 터미널: store_terminal 우선, 없으면 gate(터미널 형식일 때만)."""
+    t = (r.get("store_terminal") or "").strip()
+    if _TERMINAL_RE.match(t):
+        return t
+    g = (r.get("gate") or "").split("|")[0].strip()
+    if _TERMINAL_RE.match(g):
+        return g
+    return None
+
+
+def _eff_period(r: Dict[str, Any], ddays: int) -> Optional[tuple]:
+    """유효 점유 기간: store_start~store_end 있으면 그것, 없으면 반입일~+기본일."""
+    s = (r.get("store_start") or "")[:10]
+    e = (r.get("store_end") or "")[:10]
+    if s and e:
+        return s, e
+    d = (r.get("date") or r.get("created_at") or "")[:10]
+    if len(d) < 10:
+        return None
+    return d, add_days(d, ddays)
+
+
+def _storage_rows(con: Client, project_id: str) -> List[Dict[str, Any]]:
+    """점유로 칠 반입(IN) 요청 — gate 기준 유효터미널 + 다중일 기간."""
+    ddays = default_days(con)
     res = (con.table("requests")
-           .select("id,item_name,company_name,store_terminal,store_start,store_end,store_released")
+           .select("id,item_name,company_name,kind,status,gate,date,created_at,"
+                   "store_terminal,store_start,store_end,store_released")
            .eq("project_id", project_id)
+           .eq("kind", "IN")
            .execute())
-    rows = res.data or []
-    return [r for r in rows
-            if r.get("store_terminal")
-            and not r.get("store_released")
-            and r.get("store_start") and r.get("store_end")]
+    out = []
+    for r in res.data or []:
+        if r.get("store_released"):
+            continue
+        if r.get("status") not in STORAGE_BLOCKING_STATUS:
+            continue
+        term = _eff_terminal(r)
+        if not term:
+            continue
+        per = _eff_period(r, ddays)
+        if not per:
+            continue
+        out.append({**r, "_term": term, "_start": per[0], "_end": per[1]})
+    return out
 
 
 def occupancy_on(con: Client, project_id: str, on_date: str) -> Dict[str, Dict[str, Any]]:
-    """특정 날짜에 점유 중인 터미널 → 점유 정보. {terminal: {...}}"""
+    """특정 날짜에 점유 중인 터미널 → 점유 정보. {terminal: {...}} (배타적: 먼저 잡은 것)"""
     d = on_date[:10]
     out: Dict[str, Dict[str, Any]] = {}
-    for r in _active_storage_rows(con, project_id):
-        if r["store_start"][:10] <= d <= r["store_end"][:10]:
-            out[r["store_terminal"]] = {
+    for r in _storage_rows(con, project_id):
+        if r["_start"] <= d <= r["_end"]:
+            out.setdefault(r["_term"], {
                 "rid": r["id"], "item": r.get("item_name") or "",
                 "company": r.get("company_name") or "",
-                "start": r["store_start"][:10], "end": r["store_end"][:10],
-            }
+                "start": r["_start"], "end": r["_end"],
+            })
     return out
 
 
@@ -101,12 +143,12 @@ def conflicts(con: Client, project_id: str, terminal: str,
               start: str, end: str, exclude_rid: Optional[str] = None) -> List[Dict[str, Any]]:
     """선택 터미널이 [start,end] 기간에 다른 점유와 겹치는지."""
     out = []
-    for r in _active_storage_rows(con, project_id):
-        if r["store_terminal"] != terminal:
+    for r in _storage_rows(con, project_id):
+        if r["_term"] != terminal:
             continue
         if exclude_rid and r["id"] == exclude_rid:
             continue
-        if _overlaps(start[:10], end[:10], r["store_start"][:10], r["store_end"][:10]):
+        if _overlaps(start[:10], end[:10], r["_start"], r["_end"]):
             out.append(r)
     return out
 

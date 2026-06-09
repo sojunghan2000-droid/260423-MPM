@@ -159,7 +159,7 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
         cf = conflicts(con, project_id, sel_t, start_s, end_s, exclude_rid=rid)
         if cf:
             blocked = True
-            _names = ", ".join(f"{c.get('item_name') or '?'}(~{(c.get('store_end') or '')[:10]})" for c in cf)
+            _names = ", ".join(f"{c.get('item_name') or '?'}(~{(c.get('_end') or '')[:10]})" for c in cf)
             st.error(f"⛔ {sel_t} 은(는) 해당 기간에 이미 점유 중입니다: {_names}")
     if end_s < start_s:
         st.warning("종료일이 시작일보다 빠릅니다.")

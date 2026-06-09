@@ -277,7 +277,7 @@ def pdf_plan(
         y -= 7 * mm
     y -= 4 * mm
     c.setFont(_FONT_BOLD, 11)
-    c.drawString(20 * mm, y, "승인 이력")
+    c.drawString(20 * mm, y, "확정 이력")
     y -= 7 * mm
     c.setFont(_FONT_NORMAL, 10)
     for ap in approvals:
@@ -291,7 +291,7 @@ def pdf_plan(
     # 우측 하단 서명
     sign_x = 150 * mm
     c.setFont(_FONT_BOLD, 11)
-    c.drawString(sign_x, 42 * mm, "최종 승인 서명")
+    c.drawString(sign_x, 42 * mm, "최종 확정 서명")
     approved = [a for a in approvals if a.get("status") == "APPROVED"]
     x = sign_x
     y = 22 * mm

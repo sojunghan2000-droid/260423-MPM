@@ -2,7 +2,7 @@
 from pathlib import Path
 
 APP_VERSION = "v3.0.0"
-APP_TITLE = "자재 반출입 승인 · 실행 · 산출물(운영형)"
+APP_TITLE = "자재 반출입 계획확정 · 실행 · 산출물(운영형)"
 DEFAULT_SITE_NAME = "현장명(수정)"
 DEFAULT_BASE_DIR = "MaterialToolShared"
 DEFAULT_SITE_PIN = "1234"

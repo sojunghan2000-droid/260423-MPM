@@ -12,8 +12,8 @@ from shared.helpers import req_display_id
 from db.models import settings_get
 
 _STATUS_BADGE = {
-    "PENDING_APPROVAL": "⏳ 승인대기",
-    "APPROVED": "✅ 승인완료",
+    "PENDING_APPROVAL": "⏳ 확정대기",
+    "APPROVED": "✅ 확정완료",
     "REJECTED": "❌ 반려",
     "EXECUTING": "🔨 실행중",
     "DONE": "✔️ 등록완료",

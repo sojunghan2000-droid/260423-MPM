@@ -28,6 +28,7 @@ MODULE_PAGE_MAP = {
 MODULE_DISPLAY_LABELS = {
     "dashboard": "대시\n보드",
     "execution": "사진\n등록",
+    "approval":  "계획\n확정",
 }
 
 

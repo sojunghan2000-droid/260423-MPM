@@ -176,8 +176,8 @@ def page_home(con):
     st.markdown(f"""
     <div class="card">
       <h3 style="margin:0 0 1px 0;">🏠 홈</h3>
-      <p style="margin:0 0 8px 0; color:var(--text-secondary); font-size:13px;">신청 → 승인(공사/안전) → 점검/등록 → SNS 공유</p>
-      <p style="margin:0; font-size:13px;"><strong>내 승인함 :</strong> {len(inbox)}건</p>
+      <p style="margin:0 0 8px 0; color:var(--text-secondary); font-size:13px;">신청 → 계획 확정(공사/안전) → 점검/등록 → SNS 공유</p>
+      <p style="margin:0; font-size:13px;"><strong>내 확정 대기 :</strong> {len(inbox)}건</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -196,7 +196,7 @@ def page_home(con):
 
     STATUS_LABEL = {
         "PENDING_APPROVAL": ("대기중", "status-pending"),
-        "APPROVED":         ("승인됨", "status-approved"),
+        "APPROVED":         ("확정됨", "status-approved"),
         "REJECTED":         ("반려됨", "status-rejected"),
         "EXECUTING":        ("실행중", "status-executing"),
         "DONE":             ("완료",   "status-done"),

@@ -179,7 +179,7 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
 
 
 def page_approval(con: Client):
-    st.markdown("### ✍️ 승인(서명)")
+    st.markdown("### ✍️ 계획 확정")
 
     user_role = st.session_state.get("USER_ROLE", "")
     is_admin  = st.session_state.get("IS_ADMIN", False)
@@ -194,10 +194,10 @@ def page_approval(con: Client):
     if not inbox and user_role == "협력사":
         pending = _pending_my_requests(con, project_id, user_name)
         if not pending:
-            st.info("대기 중인 승인 건이 없습니다.")
+            st.info("대기 중인 계획 확정 건이 없습니다.")
             return
 
-        st.caption("📋 내가 등록한 요청 중 승인 대기 중인 건")
+        st.caption("📋 내가 등록한 요청 중 확정 대기 중인 건")
         KIND_LABEL = {"IN": "반입", "OUT": "반출"}
         STATUS_COLOR = {"PENDING_APPROVAL": "#f59e0b"}
 
@@ -216,7 +216,7 @@ def page_approval(con: Client):
                 f"<span>📍 {r.get('gate','')}</span>"
                 f"</div>"
                 f"<div style='margin-top:6px;font-size:12px;color:#92400e'>"
-                f"⏳ {step_no}단계 승인 대기 중 &nbsp;→&nbsp; <b>{role_req}</b> 서명 필요</div>"
+                f"⏳ {step_no}단계 확정 대기 중 &nbsp;→&nbsp; <b>{role_req}</b> 확정 필요</div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
@@ -224,7 +224,7 @@ def page_approval(con: Client):
 
     # ── 승인 권한 있는 계정 ───────────────────────────────────────────────
     if not inbox:
-        st.info("대기 중인 승인 건이 없습니다.")
+        st.info("대기 중인 계획 확정 건이 없습니다.")
         return
 
     st.markdown("""
@@ -238,7 +238,7 @@ def page_approval(con: Client):
     </style>
     """, unsafe_allow_html=True)
     items = [(f"[{i['role_required']}] {i['company_name']} / {i['item_name']}", i["id"]) for i in inbox]
-    sel = st.selectbox("승인 대상", items, format_func=lambda x: x[0])
+    sel = st.selectbox("확정 대상", items, format_func=lambda x: x[0])
     approval_id = sel[1]
     target = next((x for x in inbox if x["id"] == approval_id), None)
     rid = target["req_id"]

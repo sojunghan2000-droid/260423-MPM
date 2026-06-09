@@ -128,28 +128,40 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
 
     _rng = f"{min(_sel)} ~ {_slot_end(max(_sel))}" if _sel else "미선택"
     st.caption(f"하역 시간대 — 선택: **{_rng}**  (빨강=예약됨, 파랑=선택)")
-    # 세로 타임라인 CSS (신청 화면 유사) — 행마다 06:00~06:30 + 점유 업체/자재
+    # 오전/오후 좌우 2열 타임라인 CSS (모바일도 좌우 유지)
     st.markdown("""
     <style>
+    .st-key-haeyeok_grid [data-testid="stHorizontalBlock"] {
+        gap: 6px !important; flex-wrap: nowrap !important;
+    }
+    .st-key-haeyeok_grid [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        flex: 1 1 0 !important; min-width: 0 !important; max-width: none !important;
+    }
     .st-key-haeyeok_grid [data-testid="stElementContainer"] { margin-bottom: 3px !important; }
     .st-key-haeyeok_grid button {
         min-height: 30px !important; height: 30px !important;
-        padding: 0 10px !important; justify-content: flex-start !important;
+        padding: 0 8px !important; justify-content: flex-start !important;
     }
     .st-key-haeyeok_grid button p {
         font-size: 12px !important; margin: 0 !important; line-height: 1 !important;
+        white-space: nowrap !important;
     }
+    .hy-colhead { font-size:12px; font-weight:700; color:#475569; margin:0 0 4px 2px; }
     .hy-booked {
         background:#fef2f2; color:#b91c1c; border:1px solid #fecaca;
-        border-radius:6px; padding:7px 10px; font-size:12px; line-height:1.1;
-        display:flex; gap:8px; align-items:center;
+        border-radius:6px; padding:7px 8px; font-size:12px; line-height:1.1;
+        display:flex; gap:6px; align-items:center;
     }
     .hy-booked .hy-time { font-weight:700; flex:0 0 auto; }
     .hy-booked .hy-occ  { color:#7f1d1d; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     </style>
     """, unsafe_allow_html=True)
-    with st.container(key="haeyeok_grid"):
-        for _s in _all_slots:
+
+    _am = [s for s in _all_slots if s < "12:00"]
+    _pm = [s for s in _all_slots if s >= "12:00"]
+
+    def _render_slot_rows(_slots):
+        for _s in _slots:
             _label = f"{_s}~{_slot_end(_s)}"
             if _s in _booked:
                 _o = _booked[_s]
@@ -165,6 +177,15 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
                              use_container_width=True):
                     _sel.discard(_s) if _s in _sel else _sel.add(_s)
                     st.rerun()
+
+    with st.container(key="haeyeok_grid"):
+        _am_col, _pm_col = st.columns(2)
+        with _am_col:
+            st.markdown("<div class='hy-colhead'>오전</div>", unsafe_allow_html=True)
+            _render_slot_rows(_am)
+        with _pm_col:
+            st.markdown("<div class='hy-colhead'>오후</div>", unsafe_allow_html=True)
+            _render_slot_rows(_pm)
     if _sel:
         _ss = sorted(_sel)
         sel_from, sel_to = _ss[0], _slot_end(_ss[-1])

@@ -236,6 +236,22 @@ def pdf_plan(
 
     kind_txt = "반입" if req["kind"] == KIND_IN else "반출"
 
+    # 하역존 + 저장 기간
+    zone_disp = req.get("booking_zone", "") or "-"
+    _ss = (req.get("store_start") or "")[:10]
+    _se = (req.get("store_end") or "")[:10]
+    if _ss and _se:
+        store_period = f"{_ss} ~ {_se}"
+    elif req.get("date"):
+        try:
+            from shared.storage_plan import default_days as _sd, add_days as _ad
+            _d = req["date"][:10]
+            store_period = f"{_d} ~ {_ad(_d, _sd(con))} (기본)"
+        except Exception:
+            store_period = "-"
+    else:
+        store_period = "-"
+
     fields = [
         ("회사명",          req.get("company_name", "")),
         (f"반입/반출 자재", req.get("item_name", "")),
@@ -243,7 +259,9 @@ def pdf_plan(
         ("요청자",          f"{req.get('requester_name', '').replace('/', ' ')} ({req.get('requester_role', '')})"),
         ("일자",            req.get("date", "")),
         ("시간",            f"{req.get('time_from', '')} ~ {req.get('time_to', '')}"),
-        ("장소",            gate_disp),
+        ("하역존",          zone_disp),
+        ("저장 터미널",     gate_disp),
+        ("저장 기간",       store_period),
         ("운반 차량",       vehicle_disp),
         ("작업지휘자",      req.get("worker_supervisor", "")),
         ("유도원",          req.get("worker_guide", "")),

@@ -55,19 +55,22 @@ def _zone_short(z: Optional[str]) -> str:
 
 
 def haeyeok_booked_slots(con: Client, project_id: str, date: str, zone: str,
-                         kind: str, exclude_rid: Optional[str] = None) -> set:
-    """같은 날짜·하역존·구분의 다른 신청이 점유한 30분 슬롯 집합."""
+                         kind: str, exclude_rid: Optional[str] = None) -> Dict[str, Dict[str, str]]:
+    """같은 날짜·하역존·구분의 다른 신청이 점유한 30분 슬롯 → 점유 정보(업체·자재).
+
+    반환: {slot: {"company": ..., "item": ...}} (먼저 잡은 신청 기준)
+    """
     if not date:
-        return set()
+        return {}
     res = (con.table("requests")
-           .select("id,time_from,time_to,booking_zone,status")
+           .select("id,time_from,time_to,booking_zone,status,company_name,item_name")
            .eq("project_id", project_id)
            .eq("date", date[:10])
            .eq("kind", kind)
            .execute())
     zs = _zone_short(zone)
     all_slots = haeyeok_slots()
-    booked = set()
+    booked: Dict[str, Dict[str, str]] = {}
     for r in res.data or []:
         if exclude_rid and r["id"] == exclude_rid:
             continue
@@ -81,7 +84,8 @@ def haeyeok_booked_slots(con: Client, project_id: str, date: str, zone: str,
             continue
         for s in all_slots:
             if tf <= s < tt:
-                booked.add(s)
+                booked.setdefault(s, {"company": r.get("company_name") or "",
+                                      "item": r.get("item_name") or ""})
     return booked
 
 

@@ -127,37 +127,44 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
     _booked = haeyeok_booked_slots(con, project_id, req.get("date") or "", sel_zone, _kind, exclude_rid=rid)
 
     _rng = f"{min(_sel)} ~ {_slot_end(max(_sel))}" if _sel else "미선택"
-    st.caption(f"하역 시간대 — 선택: **{_rng}**  (회색=예약됨, 파랑=선택)")
-    # 컴팩트 슬롯 그리드 CSS (가로·세로·글자 절반 + 모바일 1열 스택 방지)
+    st.caption(f"하역 시간대 — 선택: **{_rng}**  (빨강=예약됨, 파랑=선택)")
+    # 세로 타임라인 CSS (신청 화면 유사) — 행마다 06:00~06:30 + 점유 업체/자재
     st.markdown("""
     <style>
-    .st-key-haeyeok_grid [data-testid="stHorizontalBlock"] {
-        gap: 3px !important; flex-wrap: nowrap !important;
-    }
-    .st-key-haeyeok_grid [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
-        flex: 1 1 0 !important; min-width: 0 !important; max-width: none !important;
-    }
-    .st-key-haeyeok_grid [data-testid="stElementContainer"] { margin: 0 !important; }
+    .st-key-haeyeok_grid [data-testid="stElementContainer"] { margin-bottom: 3px !important; }
     .st-key-haeyeok_grid button {
-        min-height: 26px !important; height: 26px !important; padding: 0 1px !important;
+        min-height: 30px !important; height: 30px !important;
+        padding: 0 10px !important; justify-content: flex-start !important;
     }
     .st-key-haeyeok_grid button p {
-        font-size: 11px !important; margin: 0 !important; line-height: 1 !important;
+        font-size: 12px !important; margin: 0 !important; line-height: 1 !important;
     }
+    .hy-booked {
+        background:#fef2f2; color:#b91c1c; border:1px solid #fecaca;
+        border-radius:6px; padding:7px 10px; font-size:12px; line-height:1.1;
+        display:flex; gap:8px; align-items:center;
+    }
+    .hy-booked .hy-time { font-weight:700; flex:0 0 auto; }
+    .hy-booked .hy-occ  { color:#7f1d1d; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     </style>
     """, unsafe_allow_html=True)
-    _ncol = 8
     with st.container(key="haeyeok_grid"):
-        for _i in range(0, len(_all_slots), _ncol):
-            _cols = st.columns(_ncol)
-            for _col, _s in zip(_cols, _all_slots[_i:_i + _ncol]):
-                with _col:
-                    _bk = _s in _booked
-                    if st.button(_s, key=f"hs_{rid}_{_s}", disabled=_bk,
-                                 type=("primary" if _s in _sel else "secondary"),
-                                 use_container_width=True):
-                        _sel.discard(_s) if _s in _sel else _sel.add(_s)
-                        st.rerun()
+        for _s in _all_slots:
+            _label = f"{_s}~{_slot_end(_s)}"
+            if _s in _booked:
+                _o = _booked[_s]
+                _occ = " · ".join(x for x in [_o.get("company"), _o.get("item")] if x) or "예약됨"
+                st.markdown(
+                    f"<div class='hy-booked'><span class='hy-time'>{_label}</span>"
+                    f"<span class='hy-occ'>{_occ}</span></div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                if st.button(_label, key=f"hs_{rid}_{_s}",
+                             type=("primary" if _s in _sel else "secondary"),
+                             use_container_width=True):
+                    _sel.discard(_s) if _s in _sel else _sel.add(_s)
+                    st.rerun()
     if _sel:
         _ss = sorted(_sel)
         sel_from, sel_to = _ss[0], _slot_end(_ss[-1])

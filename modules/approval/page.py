@@ -108,22 +108,43 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
     today = _dt.date.today()
     req_date = _to_date(req.get("date"), today)
 
-    # ── 하역 (지상) ──────────────────────────────────────────────────
+    # ── 하역 (지상): 존 + 시간 슬롯 타임테이블 (신청 화면처럼) ──────────
+    from shared.storage_plan import haeyeok_slots, slot_end as _slot_end, haeyeok_booked_slots
     st.markdown("**하역 (지상)**")
     gz = ground_zones(con)
     cur_zone = req.get("booking_zone") or (gz[0] if gz else "A-Zone")
     z_idx = gz.index(cur_zone) if cur_zone in gz else 0
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        sel_zone = st.selectbox("하역 존", gz, index=z_idx, key=f"st_zone_{rid}")
-    with c2:
-        tf = req.get("time_from") or slots[0]
-        tf_idx = slots.index(tf) if tf in slots else 0
-        sel_from = st.selectbox("하역 시작", slots, index=tf_idx, key=f"st_tf_{rid}")
-    with c3:
-        tt = req.get("time_to") or slots[min(tf_idx + 1, len(slots) - 1)]
-        tt_idx = slots.index(tt) if tt in slots else min(tf_idx + 1, len(slots) - 1)
-        sel_to = st.selectbox("하역 종료", slots, index=tt_idx, key=f"st_tt_{rid}")
+    sel_zone = st.selectbox("하역 존", gz, index=z_idx, key=f"st_zone_{rid}")
+
+    # 시간 슬롯 그리드: 같은 날짜·존·구분 점유 표시(회색) + 클릭으로 연속 선택(파랑)
+    _all_slots = haeyeok_slots()
+    _hs_key = f"st_slots_{rid}"
+    if _hs_key not in st.session_state:
+        _tf0, _tt0 = (req.get("time_from") or "")[:5], (req.get("time_to") or "")[:5]
+        st.session_state[_hs_key] = {s for s in _all_slots if _tf0 and _tt0 and _tf0 <= s < _tt0}
+    _sel = st.session_state[_hs_key]
+    _kind = req.get("kind", "IN")
+    _booked = haeyeok_booked_slots(con, project_id, req.get("date") or "", sel_zone, _kind, exclude_rid=rid)
+
+    _rng = f"{min(_sel)} ~ {_slot_end(max(_sel))}" if _sel else "미선택"
+    st.caption(f"하역 시간대 — 선택: **{_rng}**  (회색=예약됨, 파랑=선택)")
+    _ncol = 6
+    for _i in range(0, len(_all_slots), _ncol):
+        _cols = st.columns(_ncol)
+        for _col, _s in zip(_cols, _all_slots[_i:_i + _ncol]):
+            with _col:
+                _bk = _s in _booked
+                if st.button(_s, key=f"hs_{rid}_{_s}", disabled=_bk,
+                             type=("primary" if _s in _sel else "secondary"),
+                             use_container_width=True):
+                    _sel.discard(_s) if _s in _sel else _sel.add(_s)
+                    st.rerun()
+    if _sel:
+        _ss = sorted(_sel)
+        sel_from, sel_to = _ss[0], _slot_end(_ss[-1])
+    else:
+        sel_from = (req.get("time_from") or "")[:5]
+        sel_to = (req.get("time_to") or "")[:5]
 
     # ── 저장 (지하 터미널) ──────────────────────────────────────────
     st.markdown("**저장 (지하 터미널)**")

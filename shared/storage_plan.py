@@ -29,6 +29,62 @@ def floor_image(name: str) -> Optional[str]:
     return p if os.path.exists(p) else None
 
 
+# ── 하역 시간 슬롯 (지상, 06:00~18:00 30분) ───────────────────────────
+
+# 하역 슬롯 점유로 치는 상태 (당일 일정 기준 — DONE 제외)
+HAEYEOK_BLOCKING = {"PENDING_APPROVAL", "APPROVED", "EXECUTING"}
+
+
+def haeyeok_slots() -> List[str]:
+    out, t = [], 6 * 60
+    while t < 18 * 60:
+        out.append(f"{t // 60:02d}:{t % 60:02d}")
+        t += 30
+    return out
+
+
+def slot_end(s: str) -> str:
+    h, m = (int(x) for x in s.split(":"))
+    t = h * 60 + m + 30
+    return f"{t // 60:02d}:{t % 60:02d}"
+
+
+def _zone_short(z: Optional[str]) -> str:
+    z = (z or "").strip()
+    return z.replace("-Zone", "").replace("Zone", "").replace("존", "").strip() or z
+
+
+def haeyeok_booked_slots(con: Client, project_id: str, date: str, zone: str,
+                         kind: str, exclude_rid: Optional[str] = None) -> set:
+    """같은 날짜·하역존·구분의 다른 신청이 점유한 30분 슬롯 집합."""
+    if not date:
+        return set()
+    res = (con.table("requests")
+           .select("id,time_from,time_to,booking_zone,status")
+           .eq("project_id", project_id)
+           .eq("date", date[:10])
+           .eq("kind", kind)
+           .execute())
+    zs = _zone_short(zone)
+    all_slots = haeyeok_slots()
+    booked = set()
+    for r in res.data or []:
+        if exclude_rid and r["id"] == exclude_rid:
+            continue
+        if r.get("status") not in HAEYEOK_BLOCKING:
+            continue
+        if _zone_short(r.get("booking_zone")) != zs:
+            continue
+        tf = (r.get("time_from") or "")[:5]
+        tt = (r.get("time_to") or "")[:5]
+        if not tf or not tt:
+            continue
+        for s in all_slots:
+            if tf <= s < tt:
+                booked.add(s)
+    return booked
+
+
 # ── 위치 상수 ─────────────────────────────────────────────────────────
 
 def terminals_b1() -> List[str]:

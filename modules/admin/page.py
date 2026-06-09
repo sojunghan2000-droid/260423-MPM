@@ -49,12 +49,21 @@ def page_admin(con: Client):
         in_route  = st.multiselect("반입(IN) 승인순서",  options=ROLES, default=in_default)
         out_route = st.multiselect("반출(OUT) 승인순서", options=ROLES, default=out_default)
 
+        st.markdown("---")
+        st.markdown("#### ✍️ 승인 서명")
+        sig_on = st.toggle(
+            "승인 시 서명 사용",
+            value=(settings_get(con, "signature_enabled", "true") != "false"),
+            help="끄면 승인(계획 확정) 화면에서 서명 입력이 사라지고, 승인자 이름이 정자로 자동 기록됩니다.",
+        )
+
         if st.button("저장", type="primary", use_container_width=True):
             new_site_name = site_name.strip() or DEFAULT_SITE_NAME
             settings_set(con, "site_name", new_site_name)
             settings_set(con, "site_pin", site_pin.strip() or DEFAULT_SITE_PIN)
             settings_set(con, "admin_pin", admin_pin.strip() or DEFAULT_ADMIN_PIN)
             settings_set(con, "approval_routing_json", json.dumps({"IN": in_route, "OUT": out_route}, ensure_ascii=False))
+            settings_set(con, "signature_enabled", "true" if sig_on else "false")
             st.session_state["PROJECT_NAME"] = new_site_name
             st.success("저장 완료")
             st.rerun()

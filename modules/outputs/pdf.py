@@ -191,6 +191,10 @@ def draw_signatures(c: canvas.Canvas, signs: List[Dict[str, Any]], y_mm: float,
                 )
             except Exception:
                 pass
+        else:
+            # 서명 미사용: 이름 정자 표기
+            c.setFont(_FONT_NORMAL, 9)
+            c.drawString(x, y - 2, f"(정자) {s.get('signer_name', '')}")
         stamp_local = _resolve_image(con, s.get("stamp_png_path") or "") if con else None
         if stamp_local:
             try:
@@ -306,6 +310,9 @@ def pdf_plan(
                 )
             except Exception:
                 pass
+        else:
+            c.setFont(_FONT_NORMAL, 9)
+            c.drawString(x, y - 2, f"(정자) {s.get('signer_name', '')}")
         x += 60 * mm
     c.showPage()
 

@@ -12,6 +12,7 @@ from modules.outputs.crud import generate_all_outputs
 from modules.schedule.models import generate_time_slots
 from shared.signature import ui_signature_block
 from shared.helpers import req_display_id
+from db.models import settings_get
 from shared.storage_plan import (
     ground_zones, terminals_b1, terminals_b2, default_days, add_days,
     occupancy_on, conflicts, assign_storage, floor_image,
@@ -259,7 +260,12 @@ def page_approval(con: Client):
     }
     </style>
     """, unsafe_allow_html=True)
-    sign_path, stamp_path = ui_signature_block(rid, "서명 입력", key_prefix=f"ap_{approval_id}")
+    _sig_on = settings_get(con, "signature_enabled", "true") != "false"
+    if _sig_on:
+        sign_path, stamp_path = ui_signature_block(rid, "서명 입력", key_prefix=f"ap_{approval_id}")
+    else:
+        sign_path = stamp_path = None
+        st.caption(f"✍️ 서명 미사용 — 확정 시 **{user_name}** (정자)으로 자동 기록됩니다.")
     st.markdown("<div style='margin-top:20px'></div>", unsafe_allow_html=True)
     reject_reason = st.text_area("반려 사유(반려 시)", height=60)
     st.markdown("""
@@ -282,8 +288,8 @@ def page_approval(con: Client):
     with st.container(key="approval_btns"):
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("승인", type="primary", use_container_width=True):
-                if not sign_path:
+            if st.button("계획 확정", type="primary", use_container_width=True):
+                if _sig_on and not sign_path:
                     st.error("서명이 필요합니다.")
                 else:
                     rid2, msg = approval_mark(con, approval_id, "APPROVE", user_name, user_role, sign_path, stamp_path, "")

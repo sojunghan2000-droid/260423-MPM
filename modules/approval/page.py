@@ -128,17 +128,36 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
 
     _rng = f"{min(_sel)} ~ {_slot_end(max(_sel))}" if _sel else "미선택"
     st.caption(f"하역 시간대 — 선택: **{_rng}**  (회색=예약됨, 파랑=선택)")
-    _ncol = 6
-    for _i in range(0, len(_all_slots), _ncol):
-        _cols = st.columns(_ncol)
-        for _col, _s in zip(_cols, _all_slots[_i:_i + _ncol]):
-            with _col:
-                _bk = _s in _booked
-                if st.button(_s, key=f"hs_{rid}_{_s}", disabled=_bk,
-                             type=("primary" if _s in _sel else "secondary"),
-                             use_container_width=True):
-                    _sel.discard(_s) if _s in _sel else _sel.add(_s)
-                    st.rerun()
+    # 컴팩트 슬롯 그리드 CSS (가로·세로·글자 절반 + 모바일 1열 스택 방지)
+    st.markdown("""
+    <style>
+    .st-key-haeyeok_grid [data-testid="stHorizontalBlock"] {
+        gap: 3px !important; flex-wrap: nowrap !important;
+    }
+    .st-key-haeyeok_grid [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        flex: 1 1 0 !important; min-width: 0 !important; max-width: none !important;
+    }
+    .st-key-haeyeok_grid [data-testid="stElementContainer"] { margin: 0 !important; }
+    .st-key-haeyeok_grid button {
+        min-height: 26px !important; height: 26px !important; padding: 0 1px !important;
+    }
+    .st-key-haeyeok_grid button p {
+        font-size: 11px !important; margin: 0 !important; line-height: 1 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    _ncol = 8
+    with st.container(key="haeyeok_grid"):
+        for _i in range(0, len(_all_slots), _ncol):
+            _cols = st.columns(_ncol)
+            for _col, _s in zip(_cols, _all_slots[_i:_i + _ncol]):
+                with _col:
+                    _bk = _s in _booked
+                    if st.button(_s, key=f"hs_{rid}_{_s}", disabled=_bk,
+                                 type=("primary" if _s in _sel else "secondary"),
+                                 use_container_width=True):
+                        _sel.discard(_s) if _s in _sel else _sel.add(_s)
+                        st.rerun()
     if _sel:
         _ss = sorted(_sel)
         sel_from, sel_to = _ss[0], _slot_end(_ss[-1])

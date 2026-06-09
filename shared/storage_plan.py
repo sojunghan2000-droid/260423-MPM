@@ -56,14 +56,16 @@ def _zone_short(z: Optional[str]) -> str:
 
 def haeyeok_booked_slots(con: Client, project_id: str, date: str, zone: str,
                          kind: str, exclude_rid: Optional[str] = None) -> Dict[str, Dict[str, str]]:
-    """같은 날짜·하역존·구분의 다른 신청이 점유한 30분 슬롯 → 점유 정보(업체·자재).
+    """같은 날짜·하역존·구분의 다른 신청이 점유한 30분 슬롯 → 점유 상세.
 
-    반환: {slot: {"company": ..., "item": ...}} (먼저 잡은 신청 기준)
+    반환: {slot: {"company","item","requester","role","username","range"}}
+    (먼저 잡은 신청 기준. range = 그 신청의 점유 시간대 "HH:MM~HH:MM")
     """
     if not date:
         return {}
     res = (con.table("requests")
-           .select("id,time_from,time_to,booking_zone,status,company_name,item_name")
+           .select("id,time_from,time_to,booking_zone,status,company_name,item_name,"
+                   "requester_name,requester_role,requester_username")
            .eq("project_id", project_id)
            .eq("date", date[:10])
            .eq("kind", kind)
@@ -82,10 +84,17 @@ def haeyeok_booked_slots(con: Client, project_id: str, date: str, zone: str,
         tt = (r.get("time_to") or "")[:5]
         if not tf or not tt:
             continue
+        info = {
+            "company":  r.get("company_name") or "",
+            "item":     r.get("item_name") or "",
+            "requester": r.get("requester_name") or "",
+            "role":     r.get("requester_role") or "",
+            "username": r.get("requester_username") or "",
+            "range":    f"{tf}~{tt}",
+        }
         for s in all_slots:
             if tf <= s < tt:
-                booked.setdefault(s, {"company": r.get("company_name") or "",
-                                      "item": r.get("item_name") or ""})
+                booked.setdefault(s, info)
     return booked
 
 

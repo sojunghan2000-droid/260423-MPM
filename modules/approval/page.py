@@ -149,15 +149,17 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
         white-space: nowrap !important;
     }
     .hy-colhead { font-size:12px; font-weight:700; color:#475569; margin:0 0 4px 0; text-align:center; }
-    /* 점유 행: 버튼과 동일하게 절반 폭·가운데 */
-    .hy-booked {
-        width: 50%; margin: 0 auto; box-sizing: border-box;
-        background:#fef2f2; color:#b91c1c; border:1px solid #fecaca;
-        border-radius:6px; padding:7px 6px; font-size:12px; line-height:1.1;
-        display:flex; gap:5px; align-items:center; justify-content:center;
+    /* 점유 슬롯: 클릭 시 팝오버. 트리거는 시간만·빨강, 절반 폭·가운데 */
+    .st-key-haeyeok_grid [data-testid="stPopover"] { width: 50% !important; margin: 0 auto !important; }
+    .st-key-haeyeok_grid [data-testid="stPopover"] button {
+        width: 100% !important; min-height: 30px !important; height: 30px !important;
+        padding: 0 4px !important; justify-content: center !important;
+        background: #fef2f2 !important; color: #b91c1c !important; border: 1px solid #fecaca !important;
     }
-    .hy-booked .hy-time { font-weight:700; flex:0 0 auto; }
-    .hy-booked .hy-occ  { color:#7f1d1d; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .st-key-haeyeok_grid [data-testid="stPopover"] button p {
+        font-size: 12px !important; margin: 0 !important; line-height: 1 !important;
+        white-space: nowrap !important; color: #b91c1c !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -169,12 +171,17 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
             _label = f"{_s}~{_slot_end(_s)}"
             if _s in _booked:
                 _o = _booked[_s]
-                _occ = " · ".join(x for x in [_o.get("company"), _o.get("item")] if x) or "예약됨"
-                st.markdown(
-                    f"<div class='hy-booked'><span class='hy-time'>{_label}</span>"
-                    f"<span class='hy-occ'>{_occ}</span></div>",
-                    unsafe_allow_html=True,
-                )
+                with st.popover(_label, use_container_width=True):
+                    _rq = _o.get("requester") or "-"
+                    _rl = _o.get("role") or ""
+                    _un = _o.get("username") or ""
+                    _rqd = _rq + (f" ({_rl})" if _rl else "") + (f" · {_un}" if _un else "")
+                    st.markdown(
+                        f"**점유 시간대**　{_o.get('range') or '-'}  \n"
+                        f"**업체**　{_o.get('company') or '-'}  \n"
+                        f"**자재**　{_o.get('item') or '-'}  \n"
+                        f"**신청자**　{_rqd}"
+                    )
             else:
                 if st.button(_label, key=f"hs_{rid}_{_s}",
                              type=("primary" if _s in _sel else "secondary"),

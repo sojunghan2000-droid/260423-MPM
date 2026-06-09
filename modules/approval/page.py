@@ -138,19 +138,23 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
         flex: 1 1 0 !important; min-width: 0 !important; max-width: none !important;
     }
     .st-key-haeyeok_grid [data-testid="stElementContainer"] { margin-bottom: 3px !important; }
+    /* 버튼: 열 폭의 절반 + 가운데 배치, 텍스트도 가운데 */
+    .st-key-haeyeok_grid .stButton { width: 50% !important; margin: 0 auto !important; }
     .st-key-haeyeok_grid button {
-        min-height: 30px !important; height: 30px !important;
-        padding: 0 8px !important; justify-content: flex-start !important;
+        min-height: 30px !important; height: 30px !important; width: 100% !important;
+        padding: 0 4px !important; justify-content: center !important;
     }
     .st-key-haeyeok_grid button p {
         font-size: 12px !important; margin: 0 !important; line-height: 1 !important;
         white-space: nowrap !important;
     }
-    .hy-colhead { font-size:12px; font-weight:700; color:#475569; margin:0 0 4px 2px; }
+    .hy-colhead { font-size:12px; font-weight:700; color:#475569; margin:0 0 4px 0; text-align:center; }
+    /* 점유 행: 버튼과 동일하게 절반 폭·가운데 */
     .hy-booked {
+        width: 50%; margin: 0 auto; box-sizing: border-box;
         background:#fef2f2; color:#b91c1c; border:1px solid #fecaca;
-        border-radius:6px; padding:7px 8px; font-size:12px; line-height:1.1;
-        display:flex; gap:6px; align-items:center;
+        border-radius:6px; padding:7px 6px; font-size:12px; line-height:1.1;
+        display:flex; gap:5px; align-items:center; justify-content:center;
     }
     .hy-booked .hy-time { font-weight:700; flex:0 0 auto; }
     .hy-booked .hy-occ  { color:#7f1d1d; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

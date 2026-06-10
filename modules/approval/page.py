@@ -116,6 +116,13 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
     z_idx = gz.index(cur_zone) if cur_zone in gz else 0
     sel_zone = st.selectbox("하역 존", gz, index=z_idx, key=f"st_zone_{rid}")
 
+    # 저장 터미널(지하) — 신청 시 입력한 터미널(gate) 기본값, 저장 배정(store_terminal) 우선
+    term_opts = ["(미지정)"] + terminals_b1() + terminals_b2()
+    _entered_term = (req.get("gate") or "").split("|")[0].strip()
+    cur_term = req.get("store_terminal") or _entered_term or "(미지정)"
+    t_idx = term_opts.index(cur_term) if cur_term in term_opts else 0
+    sel_term = st.selectbox("저장 터미널", term_opts, index=t_idx, key=f"st_term_{rid}")
+
     # 시간 슬롯 그리드: 같은 날짜·존·구분 점유 표시(회색) + 클릭으로 연속 선택(파랑)
     _all_slots = haeyeok_slots()
     _hs_key = f"st_slots_{rid}"
@@ -204,25 +211,12 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
         sel_from = (req.get("time_from") or "")[:5]
         sel_to = (req.get("time_to") or "")[:5]
 
-    # ── 저장 (지하 터미널) ──────────────────────────────────────────
+    # ── 저장 (지하 터미널) 현황 ─────────────────────────────────────
     st.markdown("**저장 (지하 터미널)**")
-    term_opts = ["(미지정)"] + terminals_b1() + terminals_b2()
-    # 신청 시 입력한 터미널(gate)을 기본값으로 — 저장 배정(store_terminal)이 있으면 우선
-    _entered_term = (req.get("gate") or "").split("|")[0].strip()
-    cur_term = req.get("store_terminal") or _entered_term or "(미지정)"
-    t_idx = term_opts.index(cur_term) if cur_term in term_opts else 0
-    d1, d2, d3 = st.columns(3)
-    with d1:
-        sel_term = st.selectbox("저장 터미널", term_opts, index=t_idx, key=f"st_term_{rid}")
-    with d2:
-        s_start = st.date_input("저장 시작일", value=_to_date(req.get("store_start"), req_date),
-                                key=f"st_start_{rid}")
-    with d3:
-        _def_end = _to_date(req.get("store_end"),
-                            _to_date(add_days(str(s_start), ddays), req_date))
-        s_end = st.date_input("저장 종료일", value=_def_end, key=f"st_end_{rid}")
-
-    start_s, end_s = str(s_start), str(s_end)
+    # 저장 기간: 반입일 ~ 기본 보관일수 자동 산정 (시작일/종료일 입력 제거)
+    start_s = str(req_date)
+    end_s = add_days(start_s, ddays)
+    st.caption(f"저장 기간 {start_s} ~ {end_s} (자동 · 기본 {ddays}일)")
 
     # ── 현황 (저장 시작일 기준 터미널 점유) ─────────────────────────
     st.caption(f"📅 {start_s} 기준 터미널 점유 현황 (빨강=점유, 초록=빈곳)")
@@ -235,20 +229,18 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
 
     # ── 충돌 검사 ───────────────────────────────────────────────────
     blocked = False
-    if sel_t and end_s >= start_s:
+    if sel_t:
         cf = conflicts(con, project_id, sel_t, start_s, end_s, exclude_rid=rid)
         if cf:
             blocked = True
             _names = ", ".join(f"{c.get('item_name') or '?'}(~{(c.get('_end') or '')[:10]})" for c in cf)
             st.error(f"⛔ {sel_t} 은(는) 해당 기간에 이미 점유 중입니다: {_names}")
-    if end_s < start_s:
-        st.warning("종료일이 시작일보다 빠릅니다.")
 
-    if st.button("📍 위치·기간 저장", key=f"st_save_{rid}", use_container_width=True,
-                 disabled=blocked or end_s < start_s):
+    if st.button("📍 위치 저장", key=f"st_save_{rid}", use_container_width=True,
+                 disabled=blocked):
         assign_storage(con, rid, store_terminal=sel_t, store_start=start_s, store_end=end_s,
                        booking_zone=sel_zone, time_from=sel_from, time_to=sel_to)
-        st.success("저장 위치·기간이 반영되었습니다.")
+        st.success("저장 위치가 반영되었습니다.")
         st.rerun()
 
     st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)

@@ -156,8 +156,8 @@ def _has_conflict(slots: list, schedules: list, kind_val: str) -> bool:
 
 @st.dialog("🅿️ 터미널 상태 변경")
 def _terminal_status_dialog(terminal: str, in_n: int, is_freed: bool,
-                             project_id: str, date_str: str, con) -> None:
-    """팝업: 터미널 해제 / 재점유 확인."""
+                             project_id: str, date_str: str, con, hold=None) -> None:
+    """팝업: 터미널 해제 / 재점유 확인. hold 지정 시 다중일 보관 안내(읽기전용)."""
     st.markdown("""<style>
     [data-testid="stDialog"] button {
         min-height: 44px !important;
@@ -166,6 +166,29 @@ def _terminal_status_dialog(terminal: str, in_n: int, is_freed: bool,
     }
     [data-testid="stDialog"] button p { margin: 0 !important; }
     </style>""", unsafe_allow_html=True)
+
+    # 다중일 보관(다른 날짜 반입) — 날짜 해제로는 안 풀리므로 안내만 표시
+    if hold:
+        _co = hold.get("company") or "-"
+        _it = hold.get("item") or "-"
+        _ds = (hold.get("start") or "")[:10]
+        _de = (hold.get("end") or "")[:10]
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
+            f'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f59e0b;flex-shrink:0;"></span>'
+            f'<span style="font-size:16px;font-weight:700;">{terminal}</span>'
+            f'<span style="font-size:13px;color:#64748b;">보관 중</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"**업체** {_co} &nbsp;·&nbsp; **자재** {_it}", unsafe_allow_html=True)
+        st.caption(f"보관 기간 {_ds} ~ {_de} (다른 날짜 반입 건)")
+        st.info("보관 기간 동안 이 터미널은 신청할 수 없습니다. "
+                "해제는 해당 자재의 반출 또는 저장 위치 관리에서 처리하세요.")
+        if st.button("닫기", use_container_width=True):
+            st.session_state.pop("_term_dlg_trigger", None)
+            st.rerun()
+        return
 
     _dot_c  = "#f59e0b" if in_n > 0 else "#22c55e"
     _status = f"반입 {in_n}건 보관 중" if in_n > 0 else "여유"
@@ -606,7 +629,26 @@ def page_schedule(con):
                     if _cat < _ovd_threshold:   # 생성일이 2일 초과 전이면 overdue
                         _overdue_terminals.add(_g)
 
-            # 드롭다운 필터용: 점유 중 터미널 집합
+            # ── 다중일 점유 보강: 다른 날짜 반입이 보관기간(기본 14일) 내라 아직 보관 중인 터미널 ──
+            #    occupancy_on = 반입일~보관종료(해제 전) — 저장 현황과 동일 기준
+            from shared.storage_plan import occupancy_on
+            _md_hold: dict = {}   # 같은 날짜 반입 없이 다중일로만 점유된 터미널 → 상세
+            try:
+                _md_occ = occupancy_on(con, project_id, date_str)
+            except Exception:
+                _md_occ = {}
+            for _mt, _minfo in _md_occ.items():
+                if _mt not in _tocc or _tocc[_mt]:
+                    continue   # 설정 외 터미널이거나 이미 당일 반입으로 점유 표시 중
+                _tocc[_mt].add(_minfo.get("rid") or f"_md_{_mt}")
+                _mc = (_minfo.get("company") or "").strip()
+                if _mc and _mc not in _tcomp[_mt]:
+                    _tcomp[_mt].append(_mc)
+                if (_minfo.get("start") or "")[:10] < _ovd_threshold:
+                    _overdue_terminals.add(_mt)
+                _md_hold[_mt] = _minfo
+
+            # 드롭다운 필터용: 점유 중 터미널 집합 (당일 반입 + 다중일 보관)
             _occupied_terminals = {t for t, rids in _tocc.items() if rids}
 
             # 당일 해제된 터미널 목록 조회
@@ -623,6 +665,7 @@ def page_schedule(con):
                     st.session_state.get("_term_dlg_in_n", 0),
                     st.session_state.get("_term_dlg_freed", False),
                     project_id, date_str, con,
+                    hold=st.session_state.get("_term_dlg_hold"),
                 )
 
             # CSS — 카드형 버튼 스타일
@@ -689,6 +732,7 @@ def page_schedule(con):
                                         st.session_state["_term_dlg_terminal"] = _t
                                         st.session_state["_term_dlg_in_n"]     = _in_n
                                         st.session_state["_term_dlg_freed"]    = _freed
+                                        st.session_state["_term_dlg_hold"]     = _md_hold.get(_t)
                                         st.rerun()
                                 if _comp_txt:
                                     _ctxt_color = "#991b1b" if _is_ovd else "#92400e"

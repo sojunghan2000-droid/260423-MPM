@@ -123,7 +123,7 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
     t_idx = term_opts.index(cur_term) if cur_term in term_opts else 0
     sel_term = st.selectbox("저장 터미널", term_opts, index=t_idx, key=f"st_term_{rid}")
 
-    # 시간 슬롯 그리드: 같은 날짜·존·구분 점유 표시(회색) + 클릭으로 연속 선택(파랑)
+    # 하역 시간 선택 상태 (타임라인은 저장 모듈 아래에서 렌더 — 선택값 먼저 확보)
     _all_slots = haeyeok_slots()
     _hs_key = f"st_slots_{rid}"
     if _hs_key not in st.session_state:
@@ -131,10 +131,56 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
         st.session_state[_hs_key] = {s for s in _all_slots if _tf0 and _tt0 and _tf0 <= s < _tt0}
     _sel = st.session_state[_hs_key]
     _kind = req.get("kind", "IN")
-    _booked = haeyeok_booked_slots(con, project_id, req.get("date") or "", sel_zone, _kind, exclude_rid=rid)
+    if _sel:
+        _ss0 = sorted(_sel)
+        sel_from, sel_to = _ss0[0], _slot_end(_ss0[-1])
+    else:
+        sel_from = (req.get("time_from") or "")[:5]
+        sel_to = (req.get("time_to") or "")[:5]
 
+    # ══ 저장 (지하 터미널) ══════════════════════════════════════════
+    st.markdown("**저장 (지하 터미널)**")
+    # 저장 기간: 반입일 ~ 기본 보관일수 자동 산정 (시작일/종료일 입력 제거)
+    start_s = str(req_date)
+    end_s = add_days(start_s, ddays)
+    st.caption(f"저장 기간 {start_s} ~ {end_s} (자동 · 기본 {ddays}일)")
+    st.caption(f"📅 {start_s} 기준 터미널 점유 현황 (빨강=점유, 초록=빈곳)")
+    occ = occupancy_on(con, project_id, start_s)
+    sel_t = None if sel_term == "(미지정)" else sel_term
+    st.markdown("<div style='font-size:11px;color:#64748b;margin:2px 0'>B1F</div>", unsafe_allow_html=True)
+    st.markdown(_occ_grid_html(terminals_b1(), occ, sel_t), unsafe_allow_html=True)
+    st.markdown("<div style='font-size:11px;color:#64748b;margin:2px 0'>B2F</div>", unsafe_allow_html=True)
+    st.markdown(_occ_grid_html(terminals_b2(), occ, sel_t), unsafe_allow_html=True)
+
+    blocked = False
+    if sel_t:
+        cf = conflicts(con, project_id, sel_t, start_s, end_s, exclude_rid=rid)
+        if cf:
+            blocked = True
+            _names = ", ".join(f"{c.get('item_name') or '?'}(~{(c.get('_end') or '')[:10]})" for c in cf)
+            st.error(f"⛔ {sel_t} 은(는) 해당 기간에 이미 점유 중입니다: {_names}")
+
+    if st.button("📍 위치 저장", key=f"st_save_{rid}", use_container_width=True, disabled=blocked):
+        assign_storage(con, rid, store_terminal=sel_t, store_start=start_s, store_end=end_s,
+                       booking_zone=sel_zone, time_from=sel_from, time_to=sel_to)
+        st.success("저장 위치가 반영되었습니다.")
+        st.rerun()
+
+    # 조기 해제 (관리자) — 자재가 빠지면 보관 종료해 점유 즉시 해제
+    _is_admin = st.session_state.get("IS_ADMIN", False)
+    _held_term = (req.get("store_terminal") or (req.get("gate") or "").split("|")[0].strip() or "")
+    if _is_admin and _held_term[:3] in ("B1-", "B2-") and not req.get("store_released"):
+        if st.button("📦 보관 종료(해제)", key=f"st_release_{rid}", use_container_width=True,
+                     help="자재가 빠졌을 때 이 건의 터미널 점유를 즉시 해제합니다."):
+            release_storage(con, rid)
+            st.success(f"{_held_term} 보관이 종료되어 점유가 해제되었습니다.")
+            st.rerun()
+
+    # ══ 하역 시간대 (타임라인) ══════════════════════════════════════
+    _booked = haeyeok_booked_slots(con, project_id, req.get("date") or "", sel_zone, _kind, exclude_rid=rid)
     _rng = f"{min(_sel)} ~ {_slot_end(max(_sel))}" if _sel else "미선택"
-    st.caption(f"하역 시간대 — 선택: **{_rng}**  (빨강=예약됨, 파랑=선택)")
+    st.markdown("**하역 시간대**")
+    st.caption(f"선택: **{_rng}**  (빨강=예약됨, 파랑=선택)")
     # 오전/오후 좌우 2열 타임라인 CSS (모바일도 좌우 유지)
     st.markdown("""
     <style>
@@ -204,55 +250,6 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
         with _pm_col:
             st.markdown("<div class='hy-colhead'>오후</div>", unsafe_allow_html=True)
             _render_slot_rows(_pm)
-    if _sel:
-        _ss = sorted(_sel)
-        sel_from, sel_to = _ss[0], _slot_end(_ss[-1])
-    else:
-        sel_from = (req.get("time_from") or "")[:5]
-        sel_to = (req.get("time_to") or "")[:5]
-
-    # ── 저장 (지하 터미널) 현황 ─────────────────────────────────────
-    st.markdown("**저장 (지하 터미널)**")
-    # 저장 기간: 반입일 ~ 기본 보관일수 자동 산정 (시작일/종료일 입력 제거)
-    start_s = str(req_date)
-    end_s = add_days(start_s, ddays)
-    st.caption(f"저장 기간 {start_s} ~ {end_s} (자동 · 기본 {ddays}일)")
-
-    # ── 현황 (저장 시작일 기준 터미널 점유) ─────────────────────────
-    st.caption(f"📅 {start_s} 기준 터미널 점유 현황 (빨강=점유, 초록=빈곳)")
-    occ = occupancy_on(con, project_id, start_s)
-    sel_t = None if sel_term == "(미지정)" else sel_term
-    st.markdown("<div style='font-size:11px;color:#64748b;margin:2px 0'>B1F</div>", unsafe_allow_html=True)
-    st.markdown(_occ_grid_html(terminals_b1(), occ, sel_t), unsafe_allow_html=True)
-    st.markdown("<div style='font-size:11px;color:#64748b;margin:2px 0'>B2F</div>", unsafe_allow_html=True)
-    st.markdown(_occ_grid_html(terminals_b2(), occ, sel_t), unsafe_allow_html=True)
-
-    # ── 충돌 검사 ───────────────────────────────────────────────────
-    blocked = False
-    if sel_t:
-        cf = conflicts(con, project_id, sel_t, start_s, end_s, exclude_rid=rid)
-        if cf:
-            blocked = True
-            _names = ", ".join(f"{c.get('item_name') or '?'}(~{(c.get('_end') or '')[:10]})" for c in cf)
-            st.error(f"⛔ {sel_t} 은(는) 해당 기간에 이미 점유 중입니다: {_names}")
-
-    if st.button("📍 위치 저장", key=f"st_save_{rid}", use_container_width=True,
-                 disabled=blocked):
-        assign_storage(con, rid, store_terminal=sel_t, store_start=start_s, store_end=end_s,
-                       booking_zone=sel_zone, time_from=sel_from, time_to=sel_to)
-        st.success("저장 위치가 반영되었습니다.")
-        st.rerun()
-
-    # ── 조기 해제 (관리자) — 자재가 빠지면 보관 종료해 점유 즉시 해제 ──────
-    _is_admin = st.session_state.get("IS_ADMIN", False)
-    _held_term = (req.get("store_terminal") or (req.get("gate") or "").split("|")[0].strip() or "")
-    if _is_admin and _held_term[:3] in ("B1-", "B2-") and not req.get("store_released"):
-        if st.button("📦 보관 종료(해제)", key=f"st_release_{rid}", use_container_width=True,
-                     help="자재가 빠졌을 때 이 건의 터미널 점유를 즉시 해제합니다."):
-            release_storage(con, rid)
-            st.success(f"{_held_term} 보관이 종료되어 점유가 해제되었습니다.")
-            st.rerun()
-
     st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
 
 

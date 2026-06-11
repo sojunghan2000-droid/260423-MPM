@@ -15,7 +15,7 @@ from shared.helpers import req_display_id
 from db.models import settings_get
 from shared.storage_plan import (
     ground_zones, terminals_b1, terminals_b2, default_days, add_days,
-    occupancy_on, conflicts, assign_storage, floor_image,
+    occupancy_on, conflicts, assign_storage, release_storage, floor_image,
 )
 
 
@@ -242,6 +242,16 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
                        booking_zone=sel_zone, time_from=sel_from, time_to=sel_to)
         st.success("저장 위치가 반영되었습니다.")
         st.rerun()
+
+    # ── 조기 해제 (관리자) — 자재가 빠지면 보관 종료해 점유 즉시 해제 ──────
+    _is_admin = st.session_state.get("IS_ADMIN", False)
+    _held_term = (req.get("store_terminal") or (req.get("gate") or "").split("|")[0].strip() or "")
+    if _is_admin and _held_term[:3] in ("B1-", "B2-") and not req.get("store_released"):
+        if st.button("📦 보관 종료(해제)", key=f"st_release_{rid}", use_container_width=True,
+                     help="자재가 빠졌을 때 이 건의 터미널 점유를 즉시 해제합니다."):
+            release_storage(con, rid)
+            st.success(f"{_held_term} 보관이 종료되어 점유가 해제되었습니다.")
+            st.rerun()
 
     st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
 

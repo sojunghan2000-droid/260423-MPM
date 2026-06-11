@@ -186,6 +186,21 @@ def page_admin(con: Client):
         st.success("저장되었습니다.")
         st.rerun()
 
+    # ── 터미널 기본 보관 기간 ─────────────────────────────────────────────
+    st.markdown("##### 📦 터미널 기본 보관 기간")
+    st.caption("반입일부터 며칠간 터미널을 점유로 볼지 기본값입니다. "
+               "(계획 확정 시 저장 기간 산정 + 신청 화면 점유 표시·차단에 적용)")
+    try:
+        _sdd_cur = max(1, int(settings_get(con, "storage_default_days", "14")))
+    except Exception:
+        _sdd_cur = 14
+    _sdd_new = st.number_input("기본 보관일수 (일)", min_value=1, max_value=180,
+                               value=_sdd_cur, step=1, key="storage_default_days_inp")
+    if int(_sdd_new) != _sdd_cur:
+        settings_set(con, "storage_default_days", str(int(_sdd_new)))
+        st.toast(f"기본 보관일수가 {int(_sdd_new)}일로 저장되었습니다.", icon="📦")
+        st.rerun()
+
     st.markdown("---")
 
     # ── 예약존 설정 ────────────────────────────────────────────────────────

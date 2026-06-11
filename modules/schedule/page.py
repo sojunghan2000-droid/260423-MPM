@@ -183,11 +183,28 @@ def _terminal_status_dialog(terminal: str, in_n: int, is_freed: bool,
         )
         st.markdown(f"**업체** {_co} &nbsp;·&nbsp; **자재** {_it}", unsafe_allow_html=True)
         st.caption(f"보관 기간 {_ds} ~ {_de} (다른 날짜 반입 건)")
-        st.info("보관 기간 동안 이 터미널은 신청할 수 없습니다. "
-                "해제는 해당 자재의 반출 또는 저장 위치 관리에서 처리하세요.")
-        if st.button("닫기", use_container_width=True):
-            st.session_state.pop("_term_dlg_trigger", None)
-            st.rerun()
+        _is_admin = st.session_state.get("IS_ADMIN", False)
+        _hrid = str(hold.get("rid") or "")
+        if _is_admin and _hrid and not _hrid.startswith("_md_"):
+            st.info("자재가 빠졌다면 보관을 종료해 점유를 즉시 해제할 수 있습니다.")
+            _ra, _rb = st.columns(2)
+            with _ra:
+                if st.button("📦 보관 종료(해제)", type="primary", use_container_width=True):
+                    from shared.storage_plan import release_storage
+                    release_storage(con, _hrid)
+                    st.session_state.pop("_term_dlg_trigger", None)
+                    st.toast(f"{terminal} 보관이 종료되어 점유가 해제되었습니다.", icon="📦")
+                    st.rerun()
+            with _rb:
+                if st.button("닫기", use_container_width=True):
+                    st.session_state.pop("_term_dlg_trigger", None)
+                    st.rerun()
+        else:
+            st.info("보관 기간 동안 이 터미널은 신청할 수 없습니다. "
+                    "해제는 관리자 또는 해당 자재의 반출/저장 위치 관리에서 처리하세요.")
+            if st.button("닫기", use_container_width=True):
+                st.session_state.pop("_term_dlg_trigger", None)
+                st.rerun()
         return
 
     _dot_c  = "#f59e0b" if in_n > 0 else "#22c55e"

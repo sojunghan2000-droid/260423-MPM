@@ -41,11 +41,12 @@ def _norm_email(email: str) -> str:
 def user_create(sb: Client, project_id: str, username: str, password: str,
                 name: str, role: str, is_admin: bool = False,
                 company_name: str = "", email: str = "") -> Tuple[bool, str]:
-    """신규 계정 생성 — Supabase Auth `sign_up` + profiles 행 INSERT.
+    """신규 계정 생성 — PBKDF2 자체 계정 (profiles 에 password_hash/salt 저장).
 
-    운영 전제: Supabase Auth 'Confirm email' OFF (가입 즉시 로그인 가능).
-    Confirm email 을 켜면 가입 직후 로그인 불가(메일 확인 필요)하며,
-    user_authenticate 의 EMAIL_NOT_CONFIRMED 분기가 이를 처리한다.
+    Supabase Auth `sign_up` 을 호출하지 않으므로 가입 시 확인 메일이 발송되지
+    않는다(내장 이메일 rate limit 회피). 이메일은 저장만 하며, 향후 커스텀
+    SMTP 연결 시 Supabase Auth 기반 이메일 재설정으로 전환할 수 있다.
+    로그인은 user_authenticate 의 PBKDF2 경로로 처리된다.
     """
     if len(password) < 6:
         return False, "비밀번호는 6자 이상이어야 합니다."
@@ -67,60 +68,29 @@ def user_create(sb: Client, project_id: str, username: str, password: str,
     if dup_em.data:
         return False, "이미 가입된 이메일입니다."
 
-    # 2) Supabase Auth 가입
+    # 2) PBKDF2 자격증명 생성 (Supabase Auth 미사용 → 확인 메일 미발송으로 rate limit 회피)
+    salt = _new_salt()
+    pw_hash = _hash_pw(password, salt)
+
+    # 3) profiles 행 INSERT (PBKDF2 자격증명 저장, supabase_uid 는 NULL — 이메일은 보관)
     try:
-        res = sb.auth.sign_up({
-            "email": email,
-            "password": password,
-            "options": {
-                "data": {
-                    "project_id":   project_id,
-                    "username":     username.strip(),
-                    "name":         name.strip(),
-                    "role":         role,
-                    "company_name": company_name.strip(),
-                }
-            },
-        })
+        sb.table("profiles").insert({
+            "id":            new_id(),
+            "project_id":    project_id,
+            "username":      username.strip(),
+            "name":          name.strip(),
+            "role":          role,
+            "is_admin":      int(is_admin),
+            "supabase_uid":  None,
+            "email":         email,
+            "password_hash": pw_hash,
+            "salt":          salt,
+            "company_name":  company_name.strip(),
+            "created_at":    now_str(),
+            "updated_at":    now_str(),
+        }).execute()
     except Exception as e:
-        msg = str(e).lower()
-        if "already" in msg or "registered" in msg or "exists" in msg:
-            return False, "이미 가입된 이메일입니다."
         return False, f"가입 실패: {e}"
-
-    if not getattr(res, "user", None):
-        return False, "가입 실패: 알 수 없는 오류"
-
-    # 2-1) Supabase Auth 의 silent-success 감지 (Confirm email ON 시 중복 이메일이면
-    #      identities 가 빈 배열로 반환됨 — 진짜 신규는 identities 가 1개)
-    identities = getattr(res.user, "identities", None)
-    if identities is not None and len(identities) == 0:
-        return False, "이미 가입된 이메일입니다. 비밀번호 찾기를 이용하세요."
-
-    auth_uid = res.user.id
-
-    # 3) profiles 행 INSERT (supabase_uid 연결, PBKDF2 컬럼은 NULL)
-    sb.table("profiles").insert({
-        "id":            new_id(),
-        "project_id":    project_id,
-        "username":      username.strip(),
-        "name":          name.strip(),
-        "role":          role,
-        "is_admin":      int(is_admin),
-        "supabase_uid":  auth_uid,
-        "email":         email,
-        "password_hash": None,
-        "salt":          None,
-        "company_name":  company_name.strip(),
-        "created_at":    now_str(),
-        "updated_at":    now_str(),
-    }).execute()
-
-    # 가입 직후 SDK가 보유할 수 있는 세션을 정리해 로그인 흐름과 분리
-    try:
-        sb.auth.sign_out()
-    except Exception:
-        pass
 
     return True, "계정이 생성되었습니다. 바로 로그인하세요."
 

@@ -43,7 +43,9 @@ def user_create(sb: Client, project_id: str, username: str, password: str,
                 company_name: str = "", email: str = "") -> Tuple[bool, str]:
     """신규 계정 생성 — Supabase Auth `sign_up` + profiles 행 INSERT.
 
-    Confirm email 이 켜져 있으면 가입 직후 로그인 불가 (메일 확인 필요).
+    운영 전제: Supabase Auth 'Confirm email' OFF (가입 즉시 로그인 가능).
+    Confirm email 을 켜면 가입 직후 로그인 불가(메일 확인 필요)하며,
+    user_authenticate 의 EMAIL_NOT_CONFIRMED 분기가 이를 처리한다.
     """
     if len(password) < 6:
         return False, "비밀번호는 6자 이상이어야 합니다."
@@ -120,7 +122,7 @@ def user_create(sb: Client, project_id: str, username: str, password: str,
     except Exception:
         pass
 
-    return True, "계정이 생성되었습니다. 가입 확인 메일의 링크를 눌러 인증한 뒤 로그인하세요."
+    return True, "계정이 생성되었습니다. 바로 로그인하세요."
 
 
 def user_authenticate(sb: Client, project_id: str, username: str,

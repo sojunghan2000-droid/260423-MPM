@@ -75,13 +75,13 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
     """승인 대상 ↔ 서명 입력 사이: 하역(지상존/시간) + 저장(지하 터미널/기간) + 현황."""
     import datetime as _dt
 
-    st.markdown("#### 📦 하역 · 저장 위치 / 현황")
+    st.markdown("#### 📦 하역 · 보관 위치 / 현황")
 
     # ── 도면 보기 (참조) ────────────────────────────────────────────
     _img_g, _img_b1, _img_b2 = floor_image("ground"), floor_image("b1"), floor_image("b2")
     if _img_g or _img_b1 or _img_b2:
         with st.expander("🗺 도면 보기 (지상 · B1F · B2F)"):
-            _t_g, _t_b1, _t_b2 = st.tabs(["지상(하역)", "B1F(저장)", "B2F(저장)"])
+            _t_g, _t_b1, _t_b2 = st.tabs(["지상(하역)", "B1F(보관)", "B2F(보관)"])
             with _t_g:
                 if _img_g: st.image(_img_g, use_container_width=True)
             with _t_b1:
@@ -97,7 +97,8 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
     _in_zone = req.get("booking_zone") or "-"
     _in_gate = req.get("gate") or "-"
     _in_time = f"{req.get('time_from','')}~{req.get('time_to','')}".strip("~")
-    st.info(f"📥 신청 입력 — 하역존: **{_in_zone}** · 터미널: **{_in_gate}** · 시간: **{_in_time or '-'}**")
+    with st.container(key="approval_info_bar"):
+        st.info(f"📥 신청 입력 — 하역존: **{_in_zone}** / 터미널: **{_in_gate}** / 시간: **{_in_time or '-'}**")
 
     def _to_date(s, fallback):
         try:
@@ -121,7 +122,7 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
     _entered_term = (req.get("gate") or "").split("|")[0].strip()
     cur_term = req.get("store_terminal") or _entered_term or "(미지정)"
     t_idx = term_opts.index(cur_term) if cur_term in term_opts else 0
-    sel_term = st.selectbox("저장 터미널", term_opts, index=t_idx, key=f"st_term_{rid}")
+    sel_term = st.selectbox("보관 터미널", term_opts, index=t_idx, key=f"st_term_{rid}")
 
     # 하역 시간 선택 상태 (타임라인은 저장 모듈 아래에서 렌더 — 선택값 먼저 확보)
     _all_slots = haeyeok_slots()
@@ -138,18 +139,18 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
         sel_from = (req.get("time_from") or "")[:5]
         sel_to = (req.get("time_to") or "")[:5]
 
-    # ══ 저장 (지하 터미널) ══════════════════════════════════════════
-    st.markdown("**저장 (지하 터미널)**")
+    # ══ 보관 (지하 터미널) ══════════════════════════════════════════
+    st.markdown("**보관 (지하 터미널)**")
     # 저장 기간: 반입일 ~ 기본 보관일수 자동 산정 (시작일/종료일 입력 제거)
     start_s = str(req_date)
     end_s = add_days(start_s, ddays)
-    st.caption(f"저장 기간 {start_s} ~ {end_s} (자동 · 기본 {ddays}일)")
+    st.caption(f"보관 기간 {start_s} ~ {end_s} (자동 · 기본 {ddays}일)")
     st.caption(f"📅 {start_s} 기준 터미널 점유 현황 (빨강=점유, 초록=빈곳)")
     occ = occupancy_on(con, project_id, start_s)
     sel_t = None if sel_term == "(미지정)" else sel_term
-    st.markdown("<div style='font-size:11px;color:#64748b;margin:2px 0'>B1F</div>", unsafe_allow_html=True)
+    st.markdown("<div style='font-size:13px;font-weight:600;color:#475569;margin:8px 0 8px'>B1F</div>", unsafe_allow_html=True)
     st.markdown(_occ_grid_html(terminals_b1(), occ, sel_t), unsafe_allow_html=True)
-    st.markdown("<div style='font-size:11px;color:#64748b;margin:2px 0'>B2F</div>", unsafe_allow_html=True)
+    st.markdown("<div style='font-size:13px;font-weight:600;color:#475569;margin:16px 0 8px'>B2F</div>", unsafe_allow_html=True)
     st.markdown(_occ_grid_html(terminals_b2(), occ, sel_t), unsafe_allow_html=True)
 
     blocked = False
@@ -160,11 +161,13 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
             _names = ", ".join(f"{c.get('item_name') or '?'}(~{(c.get('_end') or '')[:10]})" for c in cf)
             st.error(f"⛔ {sel_t} 은(는) 해당 기간에 이미 점유 중입니다: {_names}")
 
-    if st.button("📍 위치 저장", key=f"st_save_{rid}", use_container_width=True, disabled=blocked):
-        assign_storage(con, rid, store_terminal=sel_t, store_start=start_s, store_end=end_s,
-                       booking_zone=sel_zone, time_from=sel_from, time_to=sel_to)
-        st.success("저장 위치가 반영되었습니다.")
-        st.rerun()
+    _, _sv_col, _ = st.columns([1, 2, 1])
+    with _sv_col:
+        if st.button("📍 위치 저장", key=f"st_save_{rid}", type="primary", use_container_width=True, disabled=blocked):
+            assign_storage(con, rid, store_terminal=sel_t, store_start=start_s, store_end=end_s,
+                           booking_zone=sel_zone, time_from=sel_from, time_to=sel_to)
+            st.success("보관 위치가 반영되었습니다.")
+            st.rerun()
 
     # 조기 해제 (관리자) — 자재가 빠지면 보관 종료해 점유 즉시 해제
     _is_admin = st.session_state.get("IS_ADMIN", False)
@@ -201,7 +204,7 @@ def _render_storage_module(con: Client, req: dict, rid: str) -> None:
         font-size: 12px !important; margin: 0 !important; line-height: 1 !important;
         white-space: nowrap !important;
     }
-    .hy-colhead { font-size:12px; font-weight:700; color:#475569; margin:0 0 4px 0; text-align:center; }
+    .hy-colhead { font-size:12px; font-weight:700; color:#475569; margin:0 0 10px 0; text-align:center; }
     /* 점유 슬롯: 클릭 시 팝오버. 트리거는 시간만·빨강, 절반 폭·가운데 */
     .st-key-haeyeok_grid [data-testid="stPopover"] { width: 50% !important; margin: 0 auto !important; }
     .st-key-haeyeok_grid [data-testid="stPopover"] button {

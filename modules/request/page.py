@@ -9,6 +9,25 @@ from config import KIND_IN, KIND_OUT, RISK_LEVELS
 from modules.request.crud import req_insert, req_get
 from modules.approval.crud import approvals_create_default
 from shared.helpers import req_display_id, phone_input
+from shared.storage_plan import terminals_b1, terminals_b2, occupancy_on
+
+
+def _occ_grid_html(terminals, occ, selected=None) -> str:
+    cells = []
+    for t in terminals:
+        o = occ.get(t)
+        if o:
+            bg, fg = "#fee2e2", "#b91c1c"
+            sub = f"{(o['item'] or '')[:6]}<br>~{o['end'][5:]}"
+        else:
+            bg, fg, sub = "#dcfce7", "#15803d", "빈곳"
+        border = "2px solid #2563eb" if t == selected else "1px solid #e2e8f0"
+        cells.append(
+            f"<div style='width:62px;background:{bg};color:{fg};border:{border};"
+            f"border-radius:6px;padding:4px 2px;text-align:center;font-size:10px;line-height:1.2;'>"
+            f"<b>{t}</b><br><span style='font-size:9px'>{sub}</span></div>"
+        )
+    return "<div style='display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;'>" + "".join(cells) + "</div>"
 
 _TIME_SLOTS = [f"{h:02d}:{m:02d}" for h in range(7, 21) for m in (0, 30)] + ["20:00"]
 # 중복 제거 및 정렬
@@ -44,6 +63,17 @@ def page_request(con: Client):
     kind_val = KIND_IN if kind_display == "반입" else KIND_OUT
 
     time_from_str, time_to_str = _time_picker("req_time")
+
+    # 보관 터미널 점유 현황 (참조용)
+    with st.expander("📦 보관 터미널 점유 현황 (B1F · B2F)"):
+        _project_id = st.session_state.get("PROJECT_ID", "")
+        _occ_date = str(date_val)
+        _occ = occupancy_on(con, _project_id, _occ_date)
+        st.caption(f"📅 {_occ_date} 기준 점유 현황 (빨강=점유, 초록=빈곳)")
+        st.markdown("<div style='font-size:13px;font-weight:600;color:#475569;margin:6px 0 6px'>B1F</div>", unsafe_allow_html=True)
+        st.markdown(_occ_grid_html(terminals_b1(), _occ), unsafe_allow_html=True)
+        st.markdown("<div style='font-size:13px;font-weight:600;color:#475569;margin:10px 0 6px'>B2F</div>", unsafe_allow_html=True)
+        st.markdown(_occ_grid_html(terminals_b2(), _occ), unsafe_allow_html=True)
 
     c1, _ = st.columns(2)
     with c1:

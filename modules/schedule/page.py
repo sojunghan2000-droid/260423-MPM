@@ -445,6 +445,22 @@ def page_schedule(con):
             unsafe_allow_html=True,
         )
 
+    # ── 도면 보기 (참조용 expander) ──────────────────────────────────────
+    try:
+        from shared.storage_plan import floor_image as _floor_image
+        _img_g, _img_b1, _img_b2 = _floor_image("ground"), _floor_image("b1"), _floor_image("b2")
+        if _img_g or _img_b1 or _img_b2:
+            with st.expander("🗺 도면 보기 (지상 · B1F · B2F)"):
+                _t_g, _t_b1, _t_b2 = st.tabs(["지상(하역)", "B1F(보관)", "B2F(보관)"])
+                with _t_g:
+                    if _img_g: st.image(_img_g, use_container_width=True)
+                with _t_b1:
+                    if _img_b1: st.image(_img_b1, use_container_width=True)
+                with _t_b2:
+                    if _img_b2: st.image(_img_b2, use_container_width=True)
+    except Exception:
+        pass
+
     # ── 존 선택 버튼 (2개 이상일 때만) ────────────────────────────────────
     if len(booking_zones) > 1:
         st.markdown("""<style>

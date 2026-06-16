@@ -1128,6 +1128,45 @@ def inject_css():
       display: flex !important;
       align-items: center !important;
     }
+    /* 신청 입력 현황 — expander와 간격 확보 + 높이 맞춤 */
+    .st-key-approval_info_bar {
+      margin-top: 10px !important;
+      margin-bottom: 12px !important;
+    }
+    .st-key-approval_info_bar [data-testid="stAlert"] > div {
+      padding-top: 0 !important;
+      padding-bottom: 0 !important;
+      min-height: 40px !important;
+      align-items: center !important;
+    }
+    .st-key-approval_info_bar [data-testid="stAlertContentInfo"] {
+      height: auto !important;
+      min-height: fit-content !important;
+      margin-top: -12px !important;
+    }
+    .st-key-approval_info_bar [data-testid="stAlert"] p {
+      margin: 0 !important;
+    }
+    /* 위치 저장 버튼 — 높이 3/4 축소 + 위 간격 */
+    [class*="st-key-st_save_"] {
+      margin-top: 12px !important;
+    }
+    [class*="st-key-st_save_"] button {
+      padding-top: 8px !important;
+      padding-bottom: 8px !important;
+    }
+    /* expander summary 내부 텍스트 세로 가운데 정렬 */
+    [data-testid="stExpander"] summary > span > div {
+      align-items: center !important;
+    }
+    [data-testid="stExpander"] summary [data-testid="stMarkdownContainer"] {
+      display: flex !important;
+      align-items: center !important;
+      height: 100% !important;
+    }
+    [data-testid="stExpander"] summary [data-testid="stMarkdownContainer"] p {
+      margin: 0 !important;
+    }
     /* 관리자 PIN 입력 — 라벨·입력박스 간격 최소화 */
     .st-key-login_admin_wrap [data-testid="stWidgetLabel"] {
       margin-bottom: 0 !important;
